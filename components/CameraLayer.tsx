@@ -31,9 +31,9 @@ const lerp = (start: number, end: number, t: number) => {
 
 // Tracking Configuration
 const MAX_TRACKING_DISTANCE = 0.25; 
+const DUPLICATE_HAND_THRESHOLD = 0.15; // 15% of screen. If hands are closer than this, treat as duplicate.
 const FRAME_PERSISTENCE_THRESHOLD = 2; 
 const MAX_MISSING_FRAMES = 30; 
-const WINNER_RECOVERY_DISTANCE = 0.5; // Aggressive recovery range (50% of screen)
 
 // Visual Stabilization Config
 const POS_SMOOTHING_FACTOR = 0.4; 
@@ -41,7 +41,7 @@ const FIST_CONFIDENCE_THRESHOLD = 0.6;
 const FIST_CONFIDENCE_DECAY = 0.25; 
 
 // Performance Config
-const GAME_LOGIC_UPDATE_INTERVAL_MS = 60; // ~15 FPS limit for React State updates
+const GAME_LOGIC_UPDATE_INTERVAL_MS = 60; 
 
 let nextStableId = 0;
 
@@ -77,7 +77,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // Zoom State
   const zoomStateRef = useRef<{ type: 'native' | 'digital', current: number }>({ type: 'digital', current: 1 });
 
-  // Logic Refs (Use refs to avoid effect dependencies)
+  // Logic Refs
   const gameStateRef = useRef(gameState);
   const winningIdsRef = useRef(winningStableIds);
   const triggerCaptureRef = useRef(triggerCapture);
@@ -108,7 +108,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const isDetectingRef = useRef<boolean>(false);
   const frameCounterRef = useRef<number>(0);
 
-  // Sync Props to Refs
+  // Sync Props
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { winningIdsRef.current = winningStableIds; }, [winningStableIds]);
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
@@ -262,12 +262,14 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         });
 
         // 2. Handle "Ghost" Winners
+        // Only draw ghost if the winner ID is NOT currently detected
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    if (vState && (now - vState.lastSeen < 800)) {
+                    // Fade out ghost over 1 second, but keep memory longer
+                    if (vState && (now - vState.lastSeen < 1000)) {
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -276,10 +278,11 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup: Run only once every 60 frames (approx 1 sec) to save cycles
+        // Cleanup: Run only once every 60 frames
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
-                if (now - state.lastSeen > 2000) {
+                // Keep visual state longer (5s) to allow for re-entry recovery
+                if (now - state.lastSeen > 5000) {
                     visualMap.delete(id);
                 }
             }
@@ -338,22 +341,44 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
              const now = Date.now();
              
-             // --- Tracking Logic ---
-             
-             const rawInputs: {x: number, y: number, index: number}[] = [];
+             // --- STEP 0: Pre-process inputs (Centroid Calculation) ---
+             const allInputs: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks, i) => {
-                   rawInputs.push({x: landmarks[9].x, y: landmarks[9].y, index: i});
+                   allInputs.push({x: landmarks[9].x, y: landmarks[9].y, index: i});
                 });
              }
 
+             // --- STEP 1: NMS (Non-Maximum Suppression) for Duplicate Hands ---
+             // Filter out hands that are physically too close to each other (Ghost duplicates)
+             const uniqueInputs: typeof allInputs = [];
+             const skippedIndices = new Set<number>();
+
+             for (let i = 0; i < allInputs.length; i++) {
+                 if (skippedIndices.has(i)) continue;
+                 const handA = allInputs[i];
+                 uniqueInputs.push(handA);
+
+                 for (let j = i + 1; j < allInputs.length; j++) {
+                     if (skippedIndices.has(j)) continue;
+                     const handB = allInputs[j];
+                     const dist = Math.sqrt((handA.x - handB.x)**2 + (handA.y - handB.y)**2);
+                     
+                     if (dist < DUPLICATE_HAND_THRESHOLD) {
+                         // Overlap detected! Ignore handB (arbitrarily keep first one)
+                         skippedIndices.add(j);
+                     }
+                 }
+             }
+
+             // From here on, use `uniqueInputs` instead of `allInputs`
              const activeTracks = tracksRef.current;
              activeTracks.forEach(t => t.missingCount++);
 
-             // Phase 1: Greedy Match (Standard Tracking)
+             // --- STEP 2: Standard Tracking (Greedy Match) ---
              const matches: {trackIdx: number, inputIdx: number, dist: number}[] = [];
              activeTracks.forEach((track, trackIdx) => {
-                 rawInputs.forEach((input, inputIdx) => {
+                 uniqueInputs.forEach((input, inputIdx) => {
                      const distSq = (track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2;
                      const dist = Math.sqrt(distSq);
                      if (dist < MAX_TRACKING_DISTANCE) {
@@ -370,7 +395,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              matches.forEach(({trackIdx, inputIdx}) => {
                  if (matchedTrackIndices.has(trackIdx) || matchedInputIndices.has(inputIdx)) return;
                  const track = activeTracks[trackIdx];
-                 const input = rawInputs[inputIdx];
+                 const input = uniqueInputs[inputIdx];
                  track.centroid.x = input.x;
                  track.centroid.y = input.y;
                  track.lastSeen = now;
@@ -382,89 +407,83 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  matchedInputIndices.add(inputIdx);
              });
 
-             // Phase 2: Winner Rescue Logic (Aggressive Re-matching for Winners)
-             // Find inputs that weren't matched in Phase 1
-             const unmatchedInputIndices = rawInputs.map((_, i) => i).filter(i => !matchedInputIndices.has(i));
+             // --- STEP 3: Absolute Winner Recovery (The Fix for Disappearing Balls) ---
+             const unmatchedInputIndices = uniqueInputs.map((_, i) => i).filter(i => !matchedInputIndices.has(i));
              
-             unmatchedInputIndices.forEach(inputIdx => {
-                const input = rawInputs[inputIdx];
-                let bestMatchId = -1;
-                let minDist = Infinity;
-                let matchType: 'existing_track' | 'lost_id' | null = null;
-                let matchTrackIdx = -1;
+             // If we are in SHOW_WINNER state, we must ensure all Winning IDs are assigned if possible.
+             if (gameStateRef.current === GameState.SHOW_WINNER && unmatchedInputIndices.length > 0) {
+                 const currentActiveWinnerIds = activeTracks
+                    .filter((t, i) => matchedTrackIndices.has(i) && winningIdsRef.current.includes(t.id))
+                    .map(t => t.id);
+                 
+                 const missingWinnerIds = winningIdsRef.current.filter(id => !currentActiveWinnerIds.includes(id));
 
-                // 2A. Check against existing tracks that are MISSING this frame AND are Winners
-                // This catches fast-moving winners that jumped outside standard tracking range
-                activeTracks.forEach((track, tIdx) => {
-                    if (!matchedTrackIndices.has(tIdx) && winningIdsRef.current.includes(track.id)) {
-                        const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
-                        if (dist < WINNER_RECOVERY_DISTANCE && dist < minDist) {
-                            minDist = dist;
-                            bestMatchId = track.id;
-                            matchType = 'existing_track';
-                            matchTrackIdx = tIdx;
-                        }
-                    }
-                });
+                 if (missingWinnerIds.length > 0) {
+                     // We have unmatched inputs (new hands) and missing winners.
+                     // Force assign them!
+                     
+                     // Simple strategy: Assign first missing winner to first unmatched input.
+                     // A better strategy (optional): Check last known position. But the user said "moves fast", 
+                     // so spatial locality might be broken. Priority is "Existence" over "Position".
+                     
+                     let recoveredCount = 0;
+                     const inputsToRecover = [...unmatchedInputIndices];
+                     
+                     missingWinnerIds.forEach(missingId => {
+                         if (inputsToRecover.length === 0) return;
+                         
+                         // Try to find the closest unmatched input to the last known position of this winner
+                         const lastVis = visualStateMapRef.current.get(missingId);
+                         let bestInputIdx = -1;
+                         let bestDist = Infinity;
+                         
+                         // Helper: normalized dist
+                         const width = canvasRef.current?.width || 1;
+                         const height = canvasRef.current?.height || 1;
+                         
+                         inputsToRecover.forEach((uIdx, arrayIdx) => {
+                             const input = uniqueInputs[uIdx];
+                             let dist = 0;
+                             if (lastVis) {
+                                 const normX = lastVis.x / width;
+                                 const normY = lastVis.y / height;
+                                 dist = Math.sqrt((normX - input.x)**2 + (normY - input.y)**2);
+                             }
+                             // If no lastVis, dist is 0 (first come first serve)
+                             
+                             if (dist < bestDist) {
+                                 bestDist = dist;
+                                 bestInputIdx = uIdx;
+                             }
+                         });
 
-                // 2B. Check against Winners that are completely LOST (not in activeTracks)
-                // This catches winners that timed out but reappeared
-                if (!matchType) {
-                    const activeIds = new Set(activeTracks.map(t => t.id));
-                    const completelyLostWinners = winningIdsRef.current.filter(id => !activeIds.has(id));
-                    
-                    for (const wid of completelyLostWinners) {
-                        const vState = visualStateMapRef.current.get(wid);
-                        if (vState) {
-                            // Convert pixel visual state back to normalized coordinates for comparison
-                            const width = canvasRef.current?.width || 1;
-                            const height = canvasRef.current?.height || 1;
-                            const normX = vState.x / width;
-                            const normY = vState.y / height;
-                            
-                            const dist = Math.sqrt((normX - input.x)**2 + (normY - input.y)**2);
-                            
-                            if (dist < WINNER_RECOVERY_DISTANCE && dist < minDist) {
-                                minDist = dist;
-                                bestMatchId = wid;
-                                matchType = 'lost_id';
-                            }
-                        }
-                    }
-                }
+                         if (bestInputIdx !== -1) {
+                             // RECOVER THE WINNER
+                             const input = uniqueInputs[bestInputIdx];
+                             
+                             // Remove from unmatched list
+                             const removeIdx = inputsToRecover.indexOf(bestInputIdx);
+                             inputsToRecover.splice(removeIdx, 1);
+                             matchedInputIndices.add(bestInputIdx);
+                             
+                             // Resurrect track
+                             activeTracks.push({
+                                 id: missingId,
+                                 centroid: {x: input.x, y: input.y},
+                                 lastSeen: now,
+                                 frameCount: FRAME_PERSISTENCE_THRESHOLD + 1, // Instant lock
+                                 missingCount: 0,
+                                 // @ts-ignore
+                                 _tempMpIndex: input.index 
+                             });
+                             recoveredCount++;
+                         }
+                     });
+                 }
+             }
 
-                // Apply Rescue Match if found
-                if (matchType) {
-                    if (matchType === 'existing_track' && matchTrackIdx !== -1) {
-                        const track = activeTracks[matchTrackIdx];
-                        track.centroid.x = input.x;
-                        track.centroid.y = input.y;
-                        track.lastSeen = now;
-                        track.frameCount++;
-                        track.missingCount = 0;
-                        // @ts-ignore
-                        track._tempMpIndex = input.index;
-                        
-                        matchedTrackIndices.add(matchTrackIdx);
-                        matchedInputIndices.add(inputIdx);
-                    } else if (matchType === 'lost_id') {
-                        // Resurrect the lost winner with its old ID
-                        activeTracks.push({
-                            id: bestMatchId,
-                            centroid: {x: input.x, y: input.y},
-                            lastSeen: now,
-                            frameCount: FRAME_PERSISTENCE_THRESHOLD + 1, // Ensure immediate visibility
-                            missingCount: 0,
-                            // @ts-ignore
-                            _tempMpIndex: input.index 
-                        });
-                        matchedInputIndices.add(inputIdx);
-                    }
-                }
-             });
-
-             // Phase 3: Create New Tracks for remaining unmatched inputs
-             rawInputs.forEach((input, idx) => {
+             // --- STEP 4: New Tracks for remaining inputs ---
+             uniqueInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
                      activeTracks.push({
                          id: nextStableId++,
