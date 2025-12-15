@@ -51,6 +51,8 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
   const progress = Math.min(timer / maxDuration, 1);
   const strokeDashoffset = CIRCUMFERENCE - (CIRCUMFERENCE * progress);
   const displayTime = Math.ceil(maxDuration - timer);
+  
+  const canStart = participantCount > winnerCount;
 
   // Setup Screen Overlay
   if (isSetup) {
@@ -107,12 +109,12 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                </div>
             ) : (
                 <>
-                   {isDetecting && participantCount < 2 && (
+                   {isDetecting && !canStart && (
                        <div className="bg-red-500/80 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur">
-                          최소 2명이 필요합니다
+                          최소 {winnerCount + 1}명이 필요합니다
                        </div>
                    )}
-                   {isDetecting && participantCount >= 2 && (
+                   {isDetecting && canStart && (
                        <div className="bg-black/40 text-white/90 px-4 py-1.5 rounded-full text-xs font-medium border border-white/10 backdrop-blur">
                           손바닥을 빠르게 뒤집으면 진행됩니다
                        </div>
@@ -265,7 +267,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                                 </div>
                              ) : (
                                 <div className="w-full bg-white/5 text-white/30 font-bold py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
-                                    {participantCount >= 2 ? "시작 버튼을 눌러주세요" : "인원 모으는 중..."}
+                                    {canStart ? "시작 버튼을 눌러주세요" : "인원 모으는 중..."}
                                 </div>
                              )}
                            </>
@@ -291,15 +293,15 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                     {isDetecting ? (
                          <button 
                              onClick={onConfirmParticipants}
-                             disabled={participantCount < 2}
+                             disabled={!canStart}
                              className={`
                                 h-full px-5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all min-w-[70px] py-2
-                                ${participantCount >= 2 
+                                ${canStart 
                                    ? 'bg-yellow-400 border-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.4)] hover:bg-yellow-300 active:scale-95' 
                                    : 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed'}
                              `}
                          >
-                             <Play className={`w-4 h-4 mt-0.5 ${participantCount >= 2 ? 'fill-black' : ''}`} />
+                             <Play className={`w-4 h-4 mt-0.5 ${canStart ? 'fill-black' : ''}`} />
                              <span className="text-[10px] whitespace-nowrap font-bold">시작</span>
                          </button>
                     ) : (
