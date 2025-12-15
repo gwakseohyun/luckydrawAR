@@ -358,7 +358,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       <div className="absolute bottom-4 left-4 z-50 pointer-events-none opacity-40 hover:opacity-100 transition-opacity">
         <div className="bg-black/70 p-2 rounded text-[10px] text-green-400 font-mono max-w-[200px] overflow-hidden">
            {debugLogs.map((log, i) => (
-              <div key={i} className="truncate">> {log}</div>
+              <div key={i} className="truncate">&gt; {log}</div>
            ))}
         </div>
       </div>
