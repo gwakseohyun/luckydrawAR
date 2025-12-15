@@ -214,12 +214,21 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                                        {/* Custom Thumb/Track Visualization */}
                                        <div className="w-full h-0.5 bg-white/20 rounded-full relative z-10 overflow-visible">
                                            <div 
-                                              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-yellow-400 rounded-full shadow-[0_0_10px_rgba(250,204,21,0.5)] transition-all"
+                                              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-yellow-400 rounded-full shadow-[0_0_10px_rgba(250,204,21,0.5)] transition-all flex items-center justify-center"
                                               style={{ 
                                                   left: `${((currentZoom - zoomCapabilities.min) / (zoomCapabilities.max - zoomCapabilities.min)) * 100}%`,
                                                   transform: 'translate(-50%, -50%)'
                                               }}
                                            />
+                                            {/* Floating Label for Zoom Level */}
+                                            <div 
+                                              className="absolute top-[-25px] -translate-x-1/2 bg-yellow-400 text-black text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"
+                                              style={{ 
+                                                  left: `${((currentZoom - zoomCapabilities.min) / (zoomCapabilities.max - zoomCapabilities.min)) * 100}%`
+                                              }}
+                                            >
+                                               {currentZoom.toFixed(1)}x
+                                            </div>
                                        </div>
                                    </div>
                                    <ZoomIn className="w-4 h-4 text-white/50" />
