@@ -32,3 +32,7 @@ export interface GameContextType {
   timer: number;
   maxTimer: number;
 }
+
+export interface CameraLayerHandle {
+  toggleCamera: () => void;
+}
