@@ -1,7 +1,8 @@
 
 export enum GameState {
-  IDLE = 'IDLE', // Waiting for camera
-  DETECT_PARTICIPANTS = 'DETECT_PARTICIPANTS', // Step 1: Count hands & Set Winner Count
+  IDLE = 'IDLE', // Waiting for camera permission
+  SETUP = 'SETUP', // Set winner count manually with blurred background
+  DETECT_PARTICIPANTS = 'DETECT_PARTICIPANTS', // Step 1: Count hands
   WAIT_FOR_FISTS_READY = 'WAIT_FOR_FISTS_READY', // Step 2: Everyone make a fist (Ready to Draw)
   DRAWING = 'DRAWING', // Step 3: Randomizing
   SHOW_WINNER = 'SHOW_WINNER', // Step 4: Reveal winner
