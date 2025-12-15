@@ -17,6 +17,7 @@ interface CameraLayerProps {
   triggerCapture: boolean;
   onCaptureComplete: (images: string[]) => void;
   onZoomInit?: (min: number, max: number, step: number, current: number) => void;
+  onStreamReady?: () => void;
 }
 
 declare global {
@@ -59,7 +60,8 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   winningStableIds, 
   triggerCapture,
   onCaptureComplete,
-  onZoomInit
+  onZoomInit,
+  onStreamReady
 }, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -174,7 +176,12 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         }
 
         video.onloadedmetadata = () => {
-           video.play().then(() => { if (!isCancelled) setIsStreamReady(true); })
+           video.play().then(() => { 
+               if (!isCancelled) {
+                   setIsStreamReady(true);
+                   if (onStreamReady) onStreamReady();
+               }
+           })
              .catch(e => setErrorMessage("화면을 터치하여 카메라를 시작해주세요."));
         };
       } catch (e: any) {
