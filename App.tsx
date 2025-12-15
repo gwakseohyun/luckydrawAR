@@ -16,7 +16,8 @@ const App: React.FC = () => {
   const [participantCount, setParticipantCount] = useState(0);
   const [winnerCount, setWinnerCount] = useState(1);
   const [detectedHands, setDetectedHands] = useState<DetectedHand[]>([]);
-  const [winningHandIndices, setWinningHandIndices] = useState<number[]>([]);
+  // CHANGED: Store Stable IDs of winners, not indices
+  const [winningStableIds, setWinningStableIds] = useState<number[]>([]);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   
   // Logic Timers
@@ -69,7 +70,7 @@ const App: React.FC = () => {
     changeState(GameState.DETECT_PARTICIPANTS);
     setParticipantCount(0);
     setWinnerCount(1);
-    setWinningHandIndices([]);
+    setWinningStableIds([]);
     setGalleryImages([]);
     setCapturedWinnerIds(new Set());
     setIsGalleryOpen(false);
@@ -305,13 +306,13 @@ const App: React.FC = () => {
         let newCaptureTriggered = false;
         const newCapturedIds = new Set(capturedWinnerIds);
 
-        winningHandIndices.forEach(winnerIndex => {
-           if (winnerIndex < detectedHands.length) {
-              const hand = detectedHands[winnerIndex];
-              if (!hand.isFist && !capturedWinnerIds.has(winnerIndex)) {
-                 newCapturedIds.add(winnerIndex);
-                 newCaptureTriggered = true;
-              }
+        // Check if any winning stable ID is currently visible and not a fist
+        detectedHands.forEach(hand => {
+           if (winningStableIds.includes(hand.stableId)) {
+               if (!hand.isFist && !capturedWinnerIds.has(hand.stableId)) {
+                  newCapturedIds.add(hand.stableId);
+                  newCaptureTriggered = true;
+               }
            }
         });
 
@@ -322,25 +323,32 @@ const App: React.FC = () => {
         break;
       }
     }
-  }, [detectedHands, gameState, winnerCount, participantCount, handleConfirmParticipants, handleReset, changeState, isGalleryOpen, winningHandIndices, capturedWinnerIds, timer, selectedImage, maxTimerDuration]);
+  }, [detectedHands, gameState, winnerCount, participantCount, handleConfirmParticipants, handleReset, changeState, isGalleryOpen, winningStableIds, capturedWinnerIds, timer, selectedImage, maxTimerDuration]);
 
   const performDraw = () => {
     const currentHandCount = detectedHands.length;
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
     const countToSelect = Math.min(winnerCount, poolSize);
     
-    // We select winners based on current array indices (0, 1, 2...) because that's how they are displayed left-to-right.
-    // Stable IDs are for tracking movement, but the "Winner" needs to be visually mapped to the person standing there.
-    // Since detectedHands is sorted by X, index 0 is always the leftmost person.
+    // Shuffle indices for random selection
     const indices = Array.from({ length: poolSize }, (_, i) => i);
-    
     for (let i = indices.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
     }
     
-    const winners = indices.slice(0, countToSelect);
-    setWinningHandIndices(winners);
+    // Pick winners
+    const winningIndices = indices.slice(0, countToSelect);
+    
+    // LOCK TO STABLE IDs:
+    // Map the selected indices (which correspond to detectedHands sorted by X at this moment)
+    // to their stable IDs. This effectively "freezes" the winner identity.
+    const winningIds = winningIndices.map(idx => {
+       if (detectedHands[idx]) return detectedHands[idx].stableId;
+       return -1;
+    }).filter(id => id !== -1);
+    
+    setWinningStableIds(winningIds);
     changeState(GameState.SHOW_WINNER);
   };
 
@@ -352,7 +360,7 @@ const App: React.FC = () => {
           ref={cameraLayerRef}
           gameState={gameState} 
           onHandsUpdate={setDetectedHands} 
-          winningHandIndices={winningHandIndices}
+          winningStableIds={winningStableIds}
           triggerCapture={shouldCapture}
           onCaptureComplete={handleCaptureComplete}
           onZoomInit={handleZoomInit}
@@ -458,3 +466,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
