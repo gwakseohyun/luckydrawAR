@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, memo } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
 import { COLORS } from '../constants';
@@ -31,11 +31,11 @@ const lerp = (start: number, end: number, t: number) => {
 
 // Tracking Configuration
 const MAX_TRACKING_DISTANCE = 0.25; 
-const FRAME_PERSISTENCE_THRESHOLD = 2; // Lowered slightly to be more responsive
-const MAX_MISSING_FRAMES = 10; // Clean up faster
+const FRAME_PERSISTENCE_THRESHOLD = 2; 
+const MAX_MISSING_FRAMES = 10; 
 
 // Visual Stabilization Config
-const POS_SMOOTHING_FACTOR = 0.4; // Slightly faster smoothing
+const POS_SMOOTHING_FACTOR = 0.4; 
 const FIST_CONFIDENCE_THRESHOLD = 0.6; 
 const FIST_CONFIDENCE_DECAY = 0.25; 
 
@@ -52,7 +52,7 @@ interface VisualState {
   isVisuallyFist: boolean;
 }
 
-const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
+const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
   gameState, 
   onHandsUpdate, 
   winningStableIds, 
@@ -76,7 +76,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // Zoom State
   const zoomStateRef = useRef<{ type: 'native' | 'digital', current: number }>({ type: 'digital', current: 1 });
 
-  // Logic Refs
+  // Logic Refs (Use refs to avoid effect dependencies)
   const gameStateRef = useRef(gameState);
   const winningIdsRef = useRef(winningStableIds);
   const triggerCaptureRef = useRef(triggerCapture);
@@ -105,7 +105,9 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const detectReqRef = useRef<number>(0);
   const handsRef = useRef<any>(null);
   const isDetectingRef = useRef<boolean>(false);
+  const frameCounterRef = useRef<number>(0);
 
+  // Sync Props to Refs
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { winningIdsRef.current = winningStableIds; }, [winningStableIds]);
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
@@ -182,6 +184,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       // 2. Render Loop (Runs at Animation Frame Rate - 60fps)
       const render = () => {
         if (isCancelled) return;
+        frameCounterRef.current++;
 
         if (video.readyState >= 2) {
            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
@@ -226,7 +229,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            const targetY = hand.centroid.y * canvas.height;
 
            if (!vState) {
-              // New hand
               vState = { 
                   x: targetX, 
                   y: targetY, 
@@ -258,7 +260,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            drawHandOverlay(ctx, vState.x, vState.y, hand, currentGameState, idx, isWinner, vState.isVisuallyFist);
         });
 
-        // 2. Handle "Ghost" Winners (Draw logic remains the same)
+        // 2. Handle "Ghost" Winners
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
@@ -273,13 +275,16 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup
-        for (const [id, state] of visualMap.entries()) {
-            if (now - state.lastSeen > 2000) {
-                visualMap.delete(id);
+        // Cleanup: Run only once every 60 frames (approx 1 sec) to save cycles
+        if (frameCounterRef.current % 60 === 0) {
+            for (const [id, state] of visualMap.entries()) {
+                if (now - state.lastSeen > 2000) {
+                    visualMap.delete(id);
+                }
             }
         }
 
+        // Capture Logic
         if (triggerCaptureRef.current) {
            try {
               const tempCanvas = document.createElement('canvas');
@@ -322,7 +327,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
           hands.setOptions({
              maxNumHands: 4, 
              modelComplexity: 0, 
-             minDetectionConfidence: 0.7, // Increased confidence to naturally filter weak ghosts
+             minDetectionConfidence: 0.7, 
              minTrackingConfidence: 0.6
           });
 
@@ -332,7 +337,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
              const now = Date.now();
              
-             // --- Tracking Logic (Removed Spatial Deduplication) ---
+             // --- Tracking Logic ---
              
              const rawInputs: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
@@ -419,9 +424,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              detectedHandsRef.current = finalHands;
 
              // --- OPTIMIZATION: Throttle React Updates ---
-             // Only update React State if:
-             // 1. Hand count changed (Critical for UI)
-             // 2. Enough time passed (15fps)
              const shouldUpdate = 
                  finalHands.length !== lastHandCountRef.current || 
                  (now - lastLogicUpdateTimeRef.current > GAME_LOGIC_UPDATE_INTERVAL_MS);
@@ -525,7 +527,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
     </div>
   );
-});
+}));
 
 export default CameraLayer;
 
@@ -545,6 +547,7 @@ function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, ha
   } else if (state === GameState.DETECT_PARTICIPANTS) {
       ctx.strokeStyle = COLORS.primary;
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
+      // Removed label drawing for detected participants to keep UI cleaner/faster
       drawLabel(ctx, x, y - labelOffset, `#${sortedIndex + 1}`, COLORS.primary, minDimension);
   } else if (state === GameState.WAIT_FOR_FISTS_READY || state === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
       const color = isVisuallyFist ? COLORS.success : COLORS.accent;
