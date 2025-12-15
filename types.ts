@@ -1,3 +1,4 @@
+
 export enum GameState {
   IDLE = 'IDLE', // Waiting for camera
   DETECT_PARTICIPANTS = 'DETECT_PARTICIPANTS', // Step 1: Count hands
@@ -15,7 +16,8 @@ export interface HandLandmark {
 }
 
 export interface DetectedHand {
-  id: number; // Index in the results array
+  id: number; // Index in the raw results array (volatile)
+  stableId: number; // Persistent ID tracked over time
   landmarks: HandLandmark[];
   handedness: 'Left' | 'Right';
   facing: 'Palm' | 'Back';
