@@ -650,17 +650,13 @@ function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, ha
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
       // Removed label drawing for detected participants to keep UI cleaner/faster
       drawLabel(ctx, x, y - labelOffset, `#${sortedIndex + 1}`, COLORS.primary, minDimension);
-  } else if (state === GameState.WAIT_FOR_FISTS_READY || state === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
+  } else if (state === GameState.WAIT_FOR_FISTS_READY) {
       const color = isVisuallyFist ? COLORS.success : COLORS.accent;
       ctx.strokeStyle = color;
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
       if (!isVisuallyFist) {
         drawLabel(ctx, x, y + labelOffset, "주먹 쥐세요", COLORS.accent, minDimension);
       }
-  } else if (state === GameState.SET_WINNER_COUNT) {
-      ctx.strokeStyle = COLORS.primary;
-      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
-      drawLabel(ctx, x, y - labelOffset, `${hand.fingerCount}명`, COLORS.primary, minDimension);
   }
 }
 
