@@ -48,9 +48,9 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between z-10 safe-area-inset">
       
       {/* Top Section: Tips, Warnings, Camera Toggle */}
-      <div className="w-full flex justify-between items-start p-4 pt-6">
+      <div className="w-full flex justify-between items-start p-4 pt-6 relative">
          {/* Top Left/Center Dynamic Info */}
-         <div className="flex-1 flex justify-center">
+         <div className="flex-1 flex justify-center pt-2">
             {warningMessage ? (
                <div className="animate-bounce-short bg-red-500/90 text-white px-4 py-1.5 rounded-full shadow-lg backdrop-blur flex items-center gap-2">
                    <AlertTriangle className="w-4 h-4" />
@@ -77,33 +77,36 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
             {onToggleCamera && (
                 <button 
                   onClick={onToggleCamera}
-                  className="relative p-3 bg-black/40 hover:bg-white/20 backdrop-blur-md rounded-full text-white border border-white/10 transition-all active:scale-95 shadow-lg"
+                  className="relative w-12 h-12 bg-black/40 hover:bg-white/20 backdrop-blur-md rounded-full text-white border border-white/10 transition-all active:scale-95 shadow-lg flex items-center justify-center"
                   aria-label="카메라 전환"
                 >
                   <SwitchCamera className="w-6 h-6" />
-                  {/* Live Indicator inside the lens area */}
-                  <span className="absolute top-3 right-3 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  {/* Live Indicator Centered */}
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                     <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                  </div>
                 </button>
             )}
          </div>
       </div>
 
       {/* Center Feedback (Timer/Counts) */}
-      <div className="flex-1 flex flex-col items-center justify-center pointer-events-none relative pb-20">
+      {/* Changed justify-center to justify-start and added pt-32 to move text up */}
+      <div className="flex-1 flex flex-col items-center justify-start pt-32 pointer-events-none relative pb-20">
         
         {/* Big Counter */}
         {isDetecting && (
-          <div className="flex flex-col items-center">
-             <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter">
+          <div className="flex flex-col items-center gap-2">
+             <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter leading-none">
                {participantCount}명
              </span>
-             <span className="text-2xl text-white font-bold drop-shadow-md -mt-2">감지됨</span>
+             <span className="text-2xl text-white font-bold drop-shadow-md mt-2">감지됨</span>
           </div>
         )}
 
         {/* Hold Timer */}
         {isHolding && timer > 0 && (
-           <div className="flex items-center justify-center">
+           <div className="flex items-center justify-center mt-10">
              <div className="relative flex items-center justify-center w-40 h-40">
                <svg className="absolute w-full h-full transform -rotate-90" viewBox="0 0 140 140">
                  <circle cx="70" cy="70" r="60" fill="transparent" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
@@ -214,9 +217,9 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                     {/* Secondary Action (Reset) */}
                     <button 
                         onClick={onReset}
-                        className="h-full px-4 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px]"
+                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-all min-w-[70px]"
                     >
-                        <RefreshCw className="w-4 h-4" />
+                        <RefreshCw className="w-4 h-4 mb-1" />
                         <span className="text-[10px]">다시 시작</span>
                     </button>
                 </div>
