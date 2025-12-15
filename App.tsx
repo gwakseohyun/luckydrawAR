@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
 import { GameState, DetectedHand, CameraLayerHandle } from './types';
-import { X, RefreshCw, Info, Image as ImageIcon, ZoomIn, Download } from 'lucide-react';
+import { X, RefreshCw, ZoomIn, Download } from 'lucide-react';
 
 // Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
 interface GestureState {
@@ -16,13 +16,12 @@ const App: React.FC = () => {
   const [participantCount, setParticipantCount] = useState(0);
   const [winnerCount, setWinnerCount] = useState(1);
   const [detectedHands, setDetectedHands] = useState<DetectedHand[]>([]);
-  // CHANGED: Store Stable IDs of winners, not indices
   const [winningStableIds, setWinningStableIds] = useState<number[]>([]);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   
   // Logic Timers
   const [timer, setTimer] = useState(0); // in seconds
-  const [maxTimerDuration, setMaxTimerDuration] = useState(3); // Dynamic max duration for UI
+  const [maxTimerDuration, setMaxTimerDuration] = useState(3);
   
   const holdStartTimeRef = useRef<number | null>(null);
   const lastValidConditionTimeRef = useRef<number>(0);
@@ -40,9 +39,7 @@ const App: React.FC = () => {
   const [currentZoom, setCurrentZoom] = useState<number>(1);
 
   // Gesture Tracking Refs
-  // Key: Stable ID (not index)
   const handGestureStates = useRef<Map<number, GestureState>>(new Map());
-  
   const lastStateChangeTimeRef = useRef<number>(Date.now());
   const participantCountRef = useRef(participantCount);
   
@@ -121,12 +118,12 @@ const App: React.FC = () => {
     setCurrentZoom(current);
   }, []);
 
-  const handleZoomChange = (val: number) => {
+  const handleZoomChange = useCallback((val: number) => {
     setCurrentZoom(val);
     if (cameraLayerRef.current) {
         cameraLayerRef.current.setZoom(val);
     }
-  };
+  }, []);
 
   // Central Game Loop
   useEffect(() => {
@@ -141,7 +138,6 @@ const App: React.FC = () => {
 
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
       detectedHands.forEach((hand) => {
-        // Use stableId for gesture tracking
         let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
         
         if (gState.step > 0 && now - gState.lastTime > 1200) { 
@@ -173,12 +169,12 @@ const App: React.FC = () => {
         }
       });
       
-      // Garbage collection for gesture states of hands no longer present
-      const currentIds = new Set(detectedHands.map(h => h.stableId));
+      // Cleanup missing hands from gesture map
+      const currentStableIds = new Set(detectedHands.map(h => h.stableId));
       for (const id of handGestureStates.current.keys()) {
-         if (!currentIds.has(id)) {
-            handGestureStates.current.delete(id);
-         }
+          if (!currentStableIds.has(id)) {
+              handGestureStates.current.delete(id);
+          }
       }
     }
 
@@ -226,11 +222,7 @@ const App: React.FC = () => {
       case GameState.WAIT_FOR_FISTS_READY: {
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
-        
-        // Check 1: Are all participants on screen?
         const isAllParticipantsVisible = total >= participantCount;
-        
-        // Check 2: Are all of them making a fist?
         const isAllFists = fistCount >= participantCount;
         
         const condition = isAllParticipantsVisible && isAllFists;
@@ -278,7 +270,6 @@ const App: React.FC = () => {
       case GameState.WAIT_FOR_FISTS_PRE_DRAW: {
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
-        
         const isAllParticipantsVisible = total >= participantCount;
         const isAllFists = fistCount >= participantCount;
         
@@ -306,7 +297,6 @@ const App: React.FC = () => {
         let newCaptureTriggered = false;
         const newCapturedIds = new Set(capturedWinnerIds);
 
-        // Check if any winning stable ID is currently visible and not a fist
         detectedHands.forEach(hand => {
            if (winningStableIds.includes(hand.stableId)) {
                if (!hand.isFist && !capturedWinnerIds.has(hand.stableId)) {
@@ -330,19 +320,15 @@ const App: React.FC = () => {
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
     const countToSelect = Math.min(winnerCount, poolSize);
     
-    // Shuffle indices for random selection
     const indices = Array.from({ length: poolSize }, (_, i) => i);
     for (let i = indices.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
     }
     
-    // Pick winners
     const winningIndices = indices.slice(0, countToSelect);
     
-    // LOCK TO STABLE IDs:
-    // Map the selected indices (which correspond to detectedHands sorted by X at this moment)
-    // to their stable IDs. This effectively "freezes" the winner identity.
+    // Freeze winners by stableId
     const winningIds = winningIndices.map(idx => {
        if (detectedHands[idx]) return detectedHands[idx].stableId;
        return -1;
