@@ -221,9 +221,9 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                     {/* Secondary Action (Reset) */}
                     <button 
                         onClick={onReset}
-                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all min-w-[70px] py-2"
+                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px] py-2"
                     >
-                        <RefreshCw className="w-4 h-4" />
+                        <RefreshCw className="w-4 h-4 mt-0.5" />
                         <span className="text-[10px] whitespace-nowrap">다시 시작</span>
                     </button>
                 </div>
