@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -55,7 +54,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const [userConfirmed, setUserConfirmed] = useState<boolean>(false);
   
   // Camera State
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   
   // Zoom State
   const zoomStateRef = useRef<{ type: 'native' | 'digital', current: number }>({ type: 'digital', current: 1 });
