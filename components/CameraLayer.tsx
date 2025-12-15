@@ -41,8 +41,8 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
   
-  // Camera State
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  // Camera State - Default to 'environment' for wide angle preference on mobile
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   
   // Logic Refs
   const gameStateRef = useRef(gameState);
