@@ -40,7 +40,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // UI States
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
   
   // Camera State
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
@@ -65,14 +64,8 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   useEffect(() => { winningIndicesRef.current = winningHandIndices; }, [winningHandIndices]);
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
 
-  const addLog = (msg: string) => {
-    setDebugLogs(prev => [msg, ...prev].slice(0, 5));
-    console.log(`[System] ${msg}`);
-  };
-
   const toggleCamera = () => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-    addLog("카메라 전환 중...");
   };
 
   useImperativeHandle(ref, () => ({
@@ -83,7 +76,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
     let isCancelled = false;
 
     const initSystem = async () => {
-      addLog(`시스템 초기화 시작 (${facingMode})...`);
       setErrorMessage(null);
       
       const video = videoRef.current;
@@ -104,8 +96,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
           const stream = video.srcObject as MediaStream;
           stream.getTracks().forEach(t => t.stop());
         }
-
-        addLog("카메라 권한 요청 중...");
         
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
@@ -117,11 +107,8 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         video.srcObject = stream;
         
         video.onloadedmetadata = () => {
-           addLog(`카메라 연결됨 (${video.videoWidth}x${video.videoHeight})`);
            video.play()
-             .then(() => addLog("비디오 재생 시작"))
              .catch(e => {
-                addLog(`자동 재생 실패 (터치 필요): ${e.message}`);
                 setErrorMessage("화면을 터치하여 카메라를 시작해주세요.");
              });
         };
@@ -138,7 +125,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            msg = "보안 연결(HTTPS)이 필요합니다.";
         }
         setErrorMessage(msg);
-        addLog(`ERROR: ${msg}`);
         return;
       }
 
@@ -219,12 +205,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       // Cancel previous loops if exists
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       renderReqRef.current = requestAnimationFrame(render);
-      addLog("렌더링 루프 시작");
 
       // 3. AI Model Setup
       if (!handsRef.current) { 
           if (!window.Hands) {
-             addLog("MediaPipe 스크립트 대기 중...");
              let attempts = 0;
              while (!window.Hands && attempts < 50) {
                 await new Promise(r => setTimeout(r, 200));
@@ -236,7 +220,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              }
           }
 
-          addLog("AI 모델 로딩 중...");
           const Hands = window.Hands;
           const hands = new Hands({
              locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
@@ -252,7 +235,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
           hands.onResults((results: Results) => {
              if (isLoadingModel) {
                 setIsLoadingModel(false);
-                addLog("AI 모델 준비 완료!");
              }
              isDetectingRef.current = false;
 
@@ -354,14 +336,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            <span className="text-white text-sm font-bold">AI 모델 준비 중...</span>
         </div>
       )}
-
-      <div className="absolute bottom-4 left-4 z-50 pointer-events-none opacity-40 hover:opacity-100 transition-opacity">
-        <div className="bg-black/70 p-2 rounded text-[10px] text-green-400 font-mono max-w-[200px] overflow-hidden">
-           {debugLogs.map((log, i) => (
-              <div key={i} className="truncate">&gt; {log}</div>
-           ))}
-        </div>
-      </div>
 
       <video 
         ref={videoRef} 
