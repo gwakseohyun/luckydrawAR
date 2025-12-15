@@ -32,8 +32,8 @@ const lerp = (start: number, end: number, t: number) => {
 // Tracking Configuration
 const MAX_TRACKING_DISTANCE = 0.25; 
 const FRAME_PERSISTENCE_THRESHOLD = 2; 
-const MAX_MISSING_FRAMES = 30; // Increased from 10 to 30 (approx 0.5s) to survive motion blur
-const WINNER_RECOVERY_DISTANCE = 0.2; // Distance to snap back to a lost winner
+const MAX_MISSING_FRAMES = 30; 
+const WINNER_RECOVERY_DISTANCE = 0.5; // Aggressive recovery range (50% of screen)
 
 // Visual Stabilization Config
 const POS_SMOOTHING_FACTOR = 0.4; 
@@ -350,7 +350,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              const activeTracks = tracksRef.current;
              activeTracks.forEach(t => t.missingCount++);
 
-             // Greedy Match
+             // Phase 1: Greedy Match (Standard Tracking)
              const matches: {trackIdx: number, inputIdx: number, dist: number}[] = [];
              activeTracks.forEach((track, trackIdx) => {
                  rawInputs.forEach((input, inputIdx) => {
@@ -382,44 +382,92 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  matchedInputIndices.add(inputIdx);
              });
 
-             // 5. Create new tracks for unmatched inputs
+             // Phase 2: Winner Rescue Logic (Aggressive Re-matching for Winners)
+             // Find inputs that weren't matched in Phase 1
+             const unmatchedInputIndices = rawInputs.map((_, i) => i).filter(i => !matchedInputIndices.has(i));
+             
+             unmatchedInputIndices.forEach(inputIdx => {
+                const input = rawInputs[inputIdx];
+                let bestMatchId = -1;
+                let minDist = Infinity;
+                let matchType: 'existing_track' | 'lost_id' | null = null;
+                let matchTrackIdx = -1;
+
+                // 2A. Check against existing tracks that are MISSING this frame AND are Winners
+                // This catches fast-moving winners that jumped outside standard tracking range
+                activeTracks.forEach((track, tIdx) => {
+                    if (!matchedTrackIndices.has(tIdx) && winningIdsRef.current.includes(track.id)) {
+                        const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
+                        if (dist < WINNER_RECOVERY_DISTANCE && dist < minDist) {
+                            minDist = dist;
+                            bestMatchId = track.id;
+                            matchType = 'existing_track';
+                            matchTrackIdx = tIdx;
+                        }
+                    }
+                });
+
+                // 2B. Check against Winners that are completely LOST (not in activeTracks)
+                // This catches winners that timed out but reappeared
+                if (!matchType) {
+                    const activeIds = new Set(activeTracks.map(t => t.id));
+                    const completelyLostWinners = winningIdsRef.current.filter(id => !activeIds.has(id));
+                    
+                    for (const wid of completelyLostWinners) {
+                        const vState = visualStateMapRef.current.get(wid);
+                        if (vState) {
+                            // Convert pixel visual state back to normalized coordinates for comparison
+                            const width = canvasRef.current?.width || 1;
+                            const height = canvasRef.current?.height || 1;
+                            const normX = vState.x / width;
+                            const normY = vState.y / height;
+                            
+                            const dist = Math.sqrt((normX - input.x)**2 + (normY - input.y)**2);
+                            
+                            if (dist < WINNER_RECOVERY_DISTANCE && dist < minDist) {
+                                minDist = dist;
+                                bestMatchId = wid;
+                                matchType = 'lost_id';
+                            }
+                        }
+                    }
+                }
+
+                // Apply Rescue Match if found
+                if (matchType) {
+                    if (matchType === 'existing_track' && matchTrackIdx !== -1) {
+                        const track = activeTracks[matchTrackIdx];
+                        track.centroid.x = input.x;
+                        track.centroid.y = input.y;
+                        track.lastSeen = now;
+                        track.frameCount++;
+                        track.missingCount = 0;
+                        // @ts-ignore
+                        track._tempMpIndex = input.index;
+                        
+                        matchedTrackIndices.add(matchTrackIdx);
+                        matchedInputIndices.add(inputIdx);
+                    } else if (matchType === 'lost_id') {
+                        // Resurrect the lost winner with its old ID
+                        activeTracks.push({
+                            id: bestMatchId,
+                            centroid: {x: input.x, y: input.y},
+                            lastSeen: now,
+                            frameCount: FRAME_PERSISTENCE_THRESHOLD + 1, // Ensure immediate visibility
+                            missingCount: 0,
+                            // @ts-ignore
+                            _tempMpIndex: input.index 
+                        });
+                        matchedInputIndices.add(inputIdx);
+                    }
+                }
+             });
+
+             // Phase 3: Create New Tracks for remaining unmatched inputs
              rawInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
-                     // WINNER RECOVERY LOGIC
-                     // Check if this "new" hand is actually a "lost winner" coming back.
-                     // This prevents the Winner Ball from disappearing if detection is lost momentarily.
-                     let assignedId = nextStableId++;
-                     
-                     if (winningIdsRef.current.length > 0) {
-                         const detectedIds = new Set(activeTracks.map(t => t.id));
-                         // Find winners that are NOT currently tracked
-                         const missingWinners = winningIdsRef.current.filter(wid => !detectedIds.has(wid));
-                         
-                         for (const missingId of missingWinners) {
-                             const lastVis = visualStateMapRef.current.get(missingId);
-                             if (lastVis) {
-                                 // Calculate distance between new input and last known winner pos
-                                 // Input is normalized (0-1), VisualState is in px. Need to normalize visual state or denormalize input.
-                                 // VisualState stores px coords.
-                                 // We have canvasRef.current dimensions.
-                                 const width = canvasRef.current?.width || 1;
-                                 const height = canvasRef.current?.height || 1;
-                                 
-                                 const lastX = lastVis.x / width;
-                                 const lastY = lastVis.y / height;
-                                 
-                                 const distSq = (input.x - lastX)**2 + (input.y - lastY)**2;
-                                 if (distSq < WINNER_RECOVERY_DISTANCE * WINNER_RECOVERY_DISTANCE) {
-                                     assignedId = missingId; // Recover ID
-                                     // Remove any other stale tracks that might claim this ID (unlikely but safe)
-                                     break;
-                                 }
-                             }
-                         }
-                     }
-
                      activeTracks.push({
-                         id: assignedId,
+                         id: nextStableId++,
                          centroid: {x: input.x, y: input.y},
                          lastSeen: now,
                          frameCount: 1,
