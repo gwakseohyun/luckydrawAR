@@ -49,6 +49,9 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // Camera State
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
   
+  // Zoom State
+  const zoomStateRef = useRef<{ type: 'native' | 'digital', current: number }>({ type: 'digital', current: 1 });
+
   // Logic Refs
   const gameStateRef = useRef(gameState);
   const winningIndicesRef = useRef(winningHandIndices);
@@ -75,15 +78,19 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
        setIsStreamReady(false);
     },
     setZoom: (zoom: number) => {
-       if (videoTrackRef.current) {
+       zoomStateRef.current.current = zoom;
+
+       if (zoomStateRef.current.type === 'native' && videoTrackRef.current) {
           const track = videoTrackRef.current;
-          const capabilities = track.getCapabilities() as any; // Cast to any to access 'zoom' if ts doesn't support
-          if (capabilities.zoom) {
-              track.applyConstraints({
-                  advanced: [{ zoom: zoom }] as any
-              }).catch(e => console.debug("Zoom apply failed", e));
-          }
+          // Apply native constraint
+          track.applyConstraints({
+              advanced: [{ zoom: zoom }] as any
+          }).catch(e => {
+              // Fail silently or fallback? Native usually just ignores if out of bounds.
+              console.debug("Native zoom apply failed", e);
+          });
        }
+       // Digital zoom is handled in the render loop via zoomStateRef.current.current
     }
   }));
 
@@ -118,7 +125,9 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         // Request Stream
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: facingMode
+            facingMode: facingMode,
+            width: { ideal: 1280 }, // Request higher res for better digital zoom quality
+            height: { ideal: 720 }
           },
           audio: false
         });
@@ -127,16 +136,28 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         const videoTrack = stream.getVideoTracks()[0];
         videoTrackRef.current = videoTrack;
 
-        // Check Zoom Capabilities
-        const capabilities = videoTrack.getCapabilities() as any;
-        const settings = videoTrack.getSettings() as any;
-        if (capabilities.zoom && onZoomInit) {
-            onZoomInit(
-                capabilities.zoom.min, 
-                capabilities.zoom.max, 
-                capabilities.zoom.step, 
-                settings.zoom || capabilities.zoom.min
-            );
+        // --- Hybrid Zoom Capability Check ---
+        const capabilities = videoTrack.getCapabilities ? (videoTrack.getCapabilities() as any) : {};
+        const settings = videoTrack.getSettings ? (videoTrack.getSettings() as any) : {};
+
+        if (capabilities.zoom && capabilities.zoom.min !== capabilities.zoom.max) {
+            // Case A: Hardware Zoom Supported
+            zoomStateRef.current = { type: 'native', current: settings.zoom || capabilities.zoom.min };
+            if (onZoomInit) {
+                onZoomInit(
+                    capabilities.zoom.min, 
+                    capabilities.zoom.max, 
+                    capabilities.zoom.step, 
+                    settings.zoom || capabilities.zoom.min
+                );
+            }
+        } else {
+            // Case B: Fallback to Digital Zoom
+            // We define an arbitrary range, e.g., 1x to 3x
+            zoomStateRef.current = { type: 'digital', current: 1 };
+            if (onZoomInit) {
+                onZoomInit(1, 3, 0.1, 1);
+            }
         }
 
         video.onloadedmetadata = () => {
@@ -175,16 +196,34 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
               canvas.height = video.videoHeight;
            }
 
-           // Draw Video
+           const zoom = zoomStateRef.current;
+           
+           // Drawing Logic
            ctx.save();
            
-           // Mirror only if user facing
+           // A. Handle Mirroring
            if (facingMode === 'user') {
              ctx.translate(canvas.width, 0);
              ctx.scale(-1, 1);
            }
+
+           // B. Handle Zoom (Digital vs Native)
+           if (zoom.type === 'native') {
+               // Native: Draw full video
+               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+           } else {
+               // Digital: Crop and Scale
+               const z = zoom.current;
+               const vw = video.videoWidth;
+               const vh = video.videoHeight;
+               const cropW = vw / z;
+               const cropH = vh / z;
+               const cropX = (vw - cropW) / 2;
+               const cropY = (vh - cropH) / 2;
+
+               ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+           }
            
-           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
            ctx.restore();
         }
 
@@ -196,12 +235,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
         if (hands.length > 0) {
            hands.forEach((hand, sortedIndex) => {
-              // Calculate coordinates based on mirroring
-              let targetX = hand.centroid.x * canvas.width;
-              if (facingMode === 'user') {
-                 targetX = (1 - hand.centroid.x) * canvas.width;
-              }
+              // Note: Since we are passing the *canvas* to MediaPipe (see Detect Loop), 
+              // the coordinates returned are already relative to the canvas (zoomed & mirrored).
+              // Therefore, we do NOT need to manually mirror X again here like we did for raw video.
+              // Just scale 0..1 to width/height.
               
+              const targetX = hand.centroid.x * canvas.width;
               const targetY = hand.centroid.y * canvas.height;
 
               let prevPos = visualSmoothMap.get(sortedIndex);
@@ -286,11 +325,13 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              }
              
              let sorted = [...rawHands];
-             if (facingMode === 'user') {
-                sorted.sort((a, b) => b.centroid.x - a.centroid.x); // Descending for mirrored
-             } else {
-                sorted.sort((a, b) => a.centroid.x - b.centroid.x); // Ascending for normal
-             }
+             // Sorting logic:
+             // Because we feed the canvas (which is already mirrored if facingMode=user) to MediaPipe,
+             // MediaPipe sees the "Right" side of the image as X=1.
+             // If mirrored, the user's right hand is on the right side of the screen.
+             // So standard ascending sort is actually correct for visual left-to-right in both cases,
+             // provided the Canvas drawing logic handled the flip correctly.
+             sorted.sort((a, b) => a.centroid.x - b.centroid.x);
              
              // Logic Smoothing
              if (prevFrameCentroidsRef.current.length > 0 && sorted.length > 0) {
@@ -322,7 +363,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
          if (video.readyState >= 2 && handsRef.current && !isDetectingRef.current) {
             isDetectingRef.current = true;
             try {
-               await handsRef.current.send({ image: video });
+               // CRITICAL CHANGE: Send 'canvas' instead of 'video'.
+               // This ensures MediaPipe analyzes the ZOOMED and CROPPED image that the user sees.
+               // If we send video, Digital Zoom would cause the AI to see outside the frame.
+               await handsRef.current.send({ image: canvas });
             } catch (e) {
                isDetectingRef.current = false;
             }
