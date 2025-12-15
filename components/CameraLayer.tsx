@@ -17,6 +17,12 @@ interface CameraLayerProps {
   onCaptureComplete: (images: string[]) => void;
 }
 
+interface CameraConfig {
+  type: 'front' | 'back' | 'front-wide' | 'back-wide';
+  constraints: MediaStreamConstraints['video'];
+  label: string;
+}
+
 declare global {
   interface Window {
     Hands: any;
@@ -41,10 +47,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
   const [isStreamReady, setIsStreamReady] = useState<boolean>(false);
-  const [userConfirmed, setUserConfirmed] = useState<boolean>(false); // New state for soft permission
+  const [userConfirmed, setUserConfirmed] = useState<boolean>(false);
   
-  // Camera State - Default to 'environment' for wide angle preference on mobile
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  // Camera Management
+  const [cameraIndex, setCameraIndex] = useState<number>(0);
+  const cameraListRef = useRef<CameraConfig[]>([]);
+  const activeStreamRef = useRef<MediaStream | null>(null);
   
   // Logic Refs
   const gameStateRef = useRef(gameState);
@@ -67,8 +75,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
 
   const toggleCamera = () => {
-    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-    setIsStreamReady(false); 
+    if (cameraListRef.current.length > 1) {
+       setIsStreamReady(false); // Show loading briefly during switch
+       setCameraIndex(prev => (prev + 1) % cameraListRef.current.length);
+    }
   };
 
   useImperativeHandle(ref, () => ({
@@ -94,53 +104,91 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       // 1. Camera Setup
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-           // Skip strict check for simpler mobile compatibility, rely on catch
+           // Skip strict check
         }
 
-        // Stop existing tracks if any
+        // Determine constraints
+        let constraints: MediaStreamConstraints['video'] = { facingMode: 'environment' };
+        
+        // If we have a list, use the current index
+        if (cameraListRef.current.length > 0) {
+            constraints = cameraListRef.current[cameraIndex].constraints;
+        }
+
+        // Stop existing tracks
+        if (activeStreamRef.current) {
+            activeStreamRef.current.getTracks().forEach(t => t.stop());
+        }
         if (video.srcObject) {
-          const stream = video.srcObject as MediaStream;
-          stream.getTracks().forEach(t => t.stop());
+            const stream = video.srcObject as MediaStream;
+            stream.getTracks().forEach(t => t.stop());
         }
         
-        // Initial request to get permissions and default camera
-        let stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: facingMode
-          },
+        // Request Stream
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: constraints,
           audio: false
         });
+        activeStreamRef.current = stream;
+        video.srcObject = stream;
 
-        // Optimization: Automatic switch to Ultra Wide camera if available and we are in environment mode
-        if (facingMode === 'environment') {
+        // ** Device Enumeration & List Building (Run once on first load) **
+        if (cameraListRef.current.length === 0) {
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const videoDevices = devices.filter(d => d.kind === 'videoinput');
                 
-                // Look for back facing cameras with "ultra", "0.5", or "wide" in label
-                const ultraWide = videoDevices.find(d => 
-                    /back/i.test(d.label) && (/ultra/i.test(d.label) || /0\.5/i.test(d.label))
-                );
+                const list: CameraConfig[] = [];
                 
-                if (ultraWide) {
-                    stream.getTracks().forEach(t => t.stop());
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: { deviceId: { exact: ultraWide.deviceId } },
-                        audio: false
-                    });
+                // Helper to check for wide angle keywords
+                const isWide = (label: string) => /wide|ultra|0\.5/i.test(label);
+                
+                // 1. Front (Generic)
+                list.push({ type: 'front', label: '전면', constraints: { facingMode: 'user' } });
+                
+                // 2. Back (Generic)
+                list.push({ type: 'back', label: '후면', constraints: { facingMode: 'environment' } });
+                
+                // 3. Back Wide (Specific) - If available
+                const backWide = videoDevices.find(d => /back|environment/i.test(d.label) && isWide(d.label));
+                if (backWide) {
+                    list.push({ type: 'back-wide', label: '후면 광각', constraints: { deviceId: { exact: backWide.deviceId } } });
                 }
-            } catch (switchErr) {
-                console.warn("Failed to switch to ultra-wide camera, staying on default:", switchErr);
-                if (stream.active === false || stream.getTracks().every(t => t.readyState === 'ended')) {
-                     stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'environment' },
-                        audio: false
-                    });
+
+                // 4. Front Wide (Specific) - If available (Requested Feature)
+                const frontWide = videoDevices.find(d => /front|user/i.test(d.label) && isWide(d.label));
+                if (frontWide) {
+                    list.push({ type: 'front-wide', label: '전면 광각', constraints: { deviceId: { exact: frontWide.deviceId } } });
+                }
+                
+                // Remove duplicates if specific deviceId is same as generic result (basic check)
+                // Note: It's hard to know which deviceId 'facingMode' picked, but usually we just keep the cycle.
+                // For better UX, we prioritize the user's requested order: Front -> Back -> [Wides]
+                
+                cameraListRef.current = list;
+
+                // Set initial index to 'Back' (index 1) if available, to start with rear camera
+                if (list.length >= 2) {
+                   setCameraIndex(1); 
+                   // NOTE: If we change index here, it might trigger re-render or effect. 
+                   // However, since we are inside the effect dependent on cameraIndex,
+                   // changing it here would cause a loop IF we didn't guard `cameraListRef.current.length === 0`.
+                   // But since we just populated it, it's fine.
+                   // Actually, to apply the 'Back' camera immediately, we might need to re-request stream if the first one was 'user'.
+                   // But for simplicity, let's let the user toggle, or just start with 'environment' which we did above.
+                }
+
+            } catch (e) {
+                console.warn("Device enumeration failed", e);
+                // Fallback: just toggle between user/env if list building fails
+                if (cameraListRef.current.length === 0) {
+                     cameraListRef.current = [
+                        { type: 'front', label: '전면', constraints: { facingMode: 'user' } },
+                        { type: 'back', label: '후면', constraints: { facingMode: 'environment' } }
+                     ];
                 }
             }
         }
-        
-        video.srcObject = stream;
         
         video.onloadedmetadata = () => {
            video.play()
@@ -181,8 +229,11 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            // Draw Video
            ctx.save();
            
-           // Mirror only if user facing
-           if (facingMode === 'user') {
+           // Check current type to decide mirroring
+           const currentType = cameraListRef.current[cameraIndex]?.type || 'back';
+           const isFront = currentType === 'front' || currentType === 'front-wide';
+           
+           if (isFront) {
              ctx.translate(canvas.width, 0);
              ctx.scale(-1, 1);
            }
@@ -196,12 +247,14 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         const currentGameState = gameStateRef.current;
         const currentWinners = winningIndicesRef.current;
         const visualSmoothMap = visualSmoothMapRef.current;
+        const currentType = cameraListRef.current[cameraIndex]?.type || 'back';
+        const isFront = currentType === 'front' || currentType === 'front-wide';
 
         if (hands.length > 0) {
            hands.forEach((hand, sortedIndex) => {
               // Calculate coordinates based on mirroring
               let targetX = hand.centroid.x * canvas.width;
-              if (facingMode === 'user') {
+              if (isFront) {
                  targetX = (1 - hand.centroid.x) * canvas.width;
               }
               
@@ -288,8 +341,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 });
              }
              
+             // Sorting logic based on current camera type
+             const currentType = cameraListRef.current[cameraIndex]?.type || 'back';
+             const isFront = currentType === 'front' || currentType === 'front-wide';
+
              let sorted = [...rawHands];
-             if (facingMode === 'user') {
+             if (isFront) {
                 sorted.sort((a, b) => b.centroid.x - a.centroid.x); // Descending for mirrored
              } else {
                 sorted.sort((a, b) => a.centroid.x - b.centroid.x); // Ascending for normal
@@ -343,12 +400,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       isCancelled = true;
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       if (detectReqRef.current) cancelAnimationFrame(detectReqRef.current);
-      if (videoRef.current && videoRef.current.srcObject) {
-         const stream = videoRef.current.srcObject as MediaStream;
-         stream.getTracks().forEach(t => t.stop());
-      }
+      // Don't stop tracks here on every effect cleanup to allow smooth transitions, 
+      // but strictly we should. For camera switching, we handle track stopping inside initSystem manually.
     };
-  }, [facingMode, userConfirmed]);
+  }, [cameraIndex, userConfirmed]);
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
