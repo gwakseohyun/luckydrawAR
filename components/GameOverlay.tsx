@@ -189,7 +189,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
       </div>
 
       {/* Bottom Bar */}
-      <div className="w-full p-4 pointer-events-auto">
+      <div className="w-full p-4 pb-10 md:pb-4 pointer-events-auto">
         <div className={`
             bg-black/70 backdrop-blur-xl border border-white/10 rounded-3xl 
             transition-all duration-300 ease-spring shadow-2xl
