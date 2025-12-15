@@ -1,10 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { analyzeHand, getSortedHands } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark } from '../types';
 import { COLORS } from '../constants';
+import { AlertTriangle, Loader2, Bug, Video, Lock, RefreshCcw, SwitchCamera } from 'lucide-react';
 
 interface Results {
-  image: CanvasImageSource;
   multiHandLandmarks: HandLandmark[][];
   multiHandedness: Array<{ label: 'Left' | 'Right', score: number }>;
 }
@@ -20,7 +20,6 @@ interface CameraLayerProps {
 declare global {
   interface Window {
     Hands: any;
-    Camera: any;
   }
 }
 
@@ -38,202 +37,366 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
+  // UI States
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  
+  // Camera State
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  
+  // Logic Refs
   const gameStateRef = useRef(gameState);
   const winningIndicesRef = useRef(winningHandIndices);
   const triggerCaptureRef = useRef(triggerCapture);
-
-  // Keep track of sorted hands for capturing logic
-  const currentHandsRef = useRef<DetectedHand[]>([]);
   
-  // Ref for visual smoothing of AR elements
-  const visualSmoothMapRef = useRef<Map<number, {x: number, y: number}>>(new Map());
-
-  // Ref for logic smoothing (to prevent sort jitter)
+  // Data Refs
+  const detectedHandsRef = useRef<DetectedHand[]>([]);
   const prevFrameCentroidsRef = useRef<{x: number, y: number}[]>([]);
+  const visualSmoothMapRef = useRef<Map<number, {x: number, y: number}>>(new Map());
+  
+  // Loop Control Refs
+  const renderReqRef = useRef<number>(0);
+  const detectReqRef = useRef<number>(0);
+  const handsRef = useRef<any>(null);
+  const isDetectingRef = useRef<boolean>(false);
 
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { winningIndicesRef.current = winningHandIndices; }, [winningHandIndices]);
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
 
+  const addLog = (msg: string) => {
+    setDebugLogs(prev => [msg, ...prev].slice(0, 5));
+    console.log(`[System] ${msg}`);
+  };
+
+  const toggleCamera = () => {
+    setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+    addLog("카메라 전환 중...");
+  };
+
   useEffect(() => {
-    let hands: any = null;
-    let camera: any = null;
     let isCancelled = false;
 
-    const initCamera = async () => {
-      const videoElement = videoRef.current;
-      const canvasElement = canvasRef.current;
+    const initSystem = async () => {
+      addLog(`시스템 초기화 시작 (${facingMode})...`);
+      setErrorMessage(null);
       
-      if (!window.Hands || !window.Camera) {
-        if (!isCancelled) setTimeout(initCamera, 100);
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      if (!video || !canvas) return;
+      
+      const ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) return;
+
+      // 1. Camera Setup
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+           throw new Error("브라우저가 카메라 접근을 지원하지 않습니다. (HTTPS 확인 필요)");
+        }
+
+        // Stop existing tracks if any
+        if (video.srcObject) {
+          const stream = video.srcObject as MediaStream;
+          stream.getTracks().forEach(t => t.stop());
+        }
+
+        addLog("카메라 권한 요청 중...");
+        
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: facingMode
+          },
+          audio: false
+        });
+        
+        video.srcObject = stream;
+        
+        video.onloadedmetadata = () => {
+           addLog(`카메라 연결됨 (${video.videoWidth}x${video.videoHeight})`);
+           video.play()
+             .then(() => addLog("비디오 재생 시작"))
+             .catch(e => {
+                addLog(`자동 재생 실패 (터치 필요): ${e.message}`);
+                setErrorMessage("화면을 터치하여 카메라를 시작해주세요.");
+             });
+        };
+      } catch (e: any) {
+        console.error(e);
+        let msg = `카메라 오류: ${e.name}`;
+        if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+           msg = "카메라 권한이 거부되었습니다. 설정에서 허용해주세요.";
+        } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+           msg = "카메라를 찾을 수 없습니다.";
+        } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+           msg = "카메라를 다른 앱이 사용 중이거나 하드웨어 오류입니다.";
+        } else if (!window.isSecureContext) {
+           msg = "보안 연결(HTTPS)이 필요합니다.";
+        }
+        setErrorMessage(msg);
+        addLog(`ERROR: ${msg}`);
         return;
       }
 
-      if (!videoElement || !canvasElement) return;
-
-      const Hands = window.Hands;
-      const Camera = window.Camera;
-      const canvasCtx = canvasElement.getContext('2d');
-      if (!canvasCtx) return;
-
-      const onResults = (results: Results) => {
+      // 2. Render Loop (Decoupled - Always Runs)
+      const render = () => {
         if (isCancelled) return;
 
-        canvasElement.width = videoElement.videoWidth;
-        canvasElement.height = videoElement.videoHeight;
+        if (video.readyState >= 2) {
+           if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+           }
 
-        // 1. Draw Video (Mirrored manually to keep text normal)
-        canvasCtx.save();
-        canvasCtx.translate(canvasElement.width, 0);
-        canvasCtx.scale(-1, 1);
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-        canvasCtx.restore();
-
-        // 2. Process Hands & Stabilize
-        const detectedHands: DetectedHand[] = [];
-        if (results.multiHandLandmarks) {
-          results.multiHandLandmarks.forEach((landmarks: HandLandmark[], index: number) => {
-            const label = results.multiHandedness && results.multiHandedness[index] 
-              ? results.multiHandedness[index].label 
-              : 'Right';
-            const handData = analyzeHand(landmarks, index, label);
-            detectedHands.push(handData);
-          });
+           // Draw Video
+           ctx.save();
+           
+           // Mirror only if user facing
+           if (facingMode === 'user') {
+             ctx.translate(canvas.width, 0);
+             ctx.scale(-1, 1);
+           }
+           
+           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+           ctx.restore();
         }
 
-        // Apply Smoothing to detectedHands centroids based on previous frame
-        if (prevFrameCentroidsRef.current.length > 0 && detectedHands.length > 0) {
-           detectedHands.forEach(hand => {
-              // Find closest previous centroid
-              let closestIdx = -1;
-              let minDist = Infinity;
-              
-              prevFrameCentroidsRef.current.forEach((prev, idx) => {
-                 const d = Math.sqrt(Math.pow(hand.centroid.x - prev.x, 2) + Math.pow(hand.centroid.y - prev.y, 2));
-                 if (d < minDist) {
-                    minDist = d;
-                    closestIdx = idx;
-                 }
-              });
-
-              // If match found within reasonable distance (e.g. 0.2 screen width), smooth it
-              if (closestIdx !== -1 && minDist < 0.2) {
-                 const prev = prevFrameCentroidsRef.current[closestIdx];
-                 // Smooth X coordinate heavily to prevent jitter
-                 hand.centroid.x = lerp(prev.x, hand.centroid.x, 0.3); // 0.3 means 30% new, 70% old
-                 hand.centroid.y = lerp(prev.y, hand.centroid.y, 0.3);
-              }
-           });
-        }
-
-        // Save current smoothed centroids for next frame
-        prevFrameCentroidsRef.current = detectedHands.map(h => ({ x: h.centroid.x, y: h.centroid.y }));
-
-        // Now Sort based on the STABILIZED centroids
-        let sortedHands = getSortedHands(detectedHands);
-        
-        // REVERSE order because we mirrored the display. 
-        // Original: Left(0) to Right(1) in source.
-        // Mirrored Display: Right Side to Left Side.
-        // We want Array Index 0 to be Left Side of Screen.
-        sortedHands = sortedHands.reverse();
-
-        currentHandsRef.current = sortedHands;
-        onHandsUpdate(sortedHands);
-
-        // 3. Draw AR Elements
+        // Draw AR Overlays
+        const hands = detectedHandsRef.current;
         const currentGameState = gameStateRef.current;
         const currentWinners = winningIndicesRef.current;
         const visualSmoothMap = visualSmoothMapRef.current;
 
-        sortedHands.forEach((hand, sortedIndex) => {
-          // Mirror the X coordinate for the overlay
-          const targetX = (1 - hand.centroid.x) * canvasElement.width;
-          const targetY = hand.centroid.y * canvasElement.height;
+        if (hands.length > 0) {
+           hands.forEach((hand, sortedIndex) => {
+              // Calculate coordinates based on mirroring
+              let targetX = hand.centroid.x * canvas.width;
+              if (facingMode === 'user') {
+                 targetX = (1 - hand.centroid.x) * canvas.width;
+              }
+              
+              const targetY = hand.centroid.y * canvas.height;
 
-          // Visual Smoothing (for the Ball/Text rendering)
-          let prevPos = visualSmoothMap.get(sortedIndex);
-          if (!prevPos) prevPos = { x: targetX, y: targetY };
+              let prevPos = visualSmoothMap.get(sortedIndex);
+              if (!prevPos) prevPos = { x: targetX, y: targetY };
 
-          const smoothX = lerp(prevPos.x, targetX, 0.2);
-          const smoothY = lerp(prevPos.y, targetY, 0.2);
-          visualSmoothMap.set(sortedIndex, { x: smoothX, y: smoothY });
+              const smoothX = lerp(prevPos.x, targetX, 0.4);
+              const smoothY = lerp(prevPos.y, targetY, 0.4);
+              visualSmoothMap.set(sortedIndex, { x: smoothX, y: smoothY });
 
-          const isWinner = currentWinners.includes(sortedIndex);
-          drawHandOverlay(canvasCtx, smoothX, smoothY, hand, currentGameState, sortedIndex, isWinner);
-        });
-
-        // Cleanup unused visual map entries
-        if (visualSmoothMap.size > sortedHands.length) {
-           for (let i = sortedHands.length; i < visualSmoothMap.size + 5; i++) {
-             visualSmoothMap.delete(i);
+              const isWinner = currentWinners.includes(sortedIndex);
+              drawHandOverlay(ctx, smoothX, smoothY, hand, currentGameState, sortedIndex, isWinner);
+           });
+           
+           if (visualSmoothMap.size > hands.length) {
+              for (let i = hands.length; i < visualSmoothMap.size + 5; i++) {
+                 visualSmoothMap.delete(i);
+              }
            }
         }
 
-        // 4. Handle Capture
         if (triggerCaptureRef.current) {
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = canvasElement.width;
-          tempCanvas.height = canvasElement.height;
-          const tCtx = tempCanvas.getContext('2d');
-
-          if (tCtx) {
-            // Draw only the canvas (which contains mirrored video + normal text)
-            tCtx.drawImage(canvasElement, 0, 0);
-            const fullScreenImage = tempCanvas.toDataURL('image/png');
-            onCaptureComplete([fullScreenImage]);
-          }
-          triggerCaptureRef.current = false; 
+           try {
+              const tempCanvas = document.createElement('canvas');
+              tempCanvas.width = canvas.width;
+              tempCanvas.height = canvas.height;
+              const tCtx = tempCanvas.getContext('2d');
+              if (tCtx) {
+                 tCtx.drawImage(canvas, 0, 0);
+                 onCaptureComplete([tempCanvas.toDataURL('image/png')]);
+              }
+           } catch (e) {}
+           triggerCaptureRef.current = false;
         }
 
-        canvasCtx.restore();
+        renderReqRef.current = requestAnimationFrame(render);
       };
+      
+      // Cancel previous loops if exists
+      if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
+      renderReqRef.current = requestAnimationFrame(render);
+      addLog("렌더링 루프 시작");
 
-      hands = new Hands({
-        locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
-      });
+      // 3. AI Model Setup
+      if (!handsRef.current) { // Only init if not already exists to save time on cam switch
+          if (!window.Hands) {
+             addLog("MediaPipe 스크립트 대기 중...");
+             let attempts = 0;
+             while (!window.Hands && attempts < 50) {
+                await new Promise(r => setTimeout(r, 200));
+                attempts++;
+             }
+             if (!window.Hands) {
+                setErrorMessage("AI 모델 스크립트를 불러오지 못했습니다.");
+                return;
+             }
+          }
 
-      hands.setOptions({
-        maxNumHands: 10,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.8, 
-        minTrackingConfidence: 0.8,
-      });
+          addLog("AI 모델 로딩 중...");
+          const Hands = window.Hands;
+          const hands = new Hands({
+             locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+          });
 
-      hands.onResults(onResults);
+          hands.setOptions({
+             maxNumHands: 4, 
+             modelComplexity: 0, 
+             minDetectionConfidence: 0.5,
+             minTrackingConfidence: 0.5
+          });
 
-      if (videoElement) {
-        camera = new Camera(videoElement, {
-          onFrame: async () => {
-            if (hands) await hands.send({ image: videoElement });
-          },
-          facingMode: 'user',
-          width: 1280,  // Set high resolution
-          height: 720
-        });
-        
-        try {
-           await camera.start();
-        } catch (err) {
-           console.error("Camera start error:", err);
-        }
+          hands.onResults((results: Results) => {
+             if (isLoadingModel) {
+                setIsLoadingModel(false);
+                addLog("AI 모델 준비 완료!");
+             }
+             isDetectingRef.current = false;
+
+             const rawHands: DetectedHand[] = [];
+             if (results.multiHandLandmarks) {
+                results.multiHandLandmarks.forEach((landmarks: HandLandmark[], index: number) => {
+                   const label = results.multiHandedness && results.multiHandedness[index] 
+                      ? results.multiHandedness[index].label 
+                      : 'Right';
+                   rawHands.push(analyzeHand(landmarks, index, label));
+                });
+             }
+
+             // Sort logic depends on mirroring
+             // If mirrored (user), left-to-right on screen is small x to large x.
+             // But raw landmarks x is normalized 0..1. 0 is left.
+             // If mirrored, 0 on raw image is drawn at right. 
+             // We want to sort visually left to right.
+             // If user facing (mirrored): X=1 is Left of screen, X=0 is Right.
+             // So sort by descending X.
+             // If env facing (normal): X=0 is Left, X=1 is Right.
+             // So sort by ascending X.
+             
+             let sorted = [...rawHands];
+             if (facingMode === 'user') {
+                sorted.sort((a, b) => b.centroid.x - a.centroid.x); // Descending for mirrored
+             } else {
+                sorted.sort((a, b) => a.centroid.x - b.centroid.x); // Ascending for normal
+             }
+             
+             // Logic Smoothing
+             if (prevFrameCentroidsRef.current.length > 0 && sorted.length > 0) {
+                sorted.forEach(hand => {
+                   let closestIdx = -1;
+                   let minDist = Infinity;
+                   prevFrameCentroidsRef.current.forEach((prev, idx) => {
+                      const d = Math.sqrt(Math.pow(hand.centroid.x - prev.x, 2) + Math.pow(hand.centroid.y - prev.y, 2));
+                      if (d < minDist) { minDist = d; closestIdx = idx; }
+                   });
+                   if (closestIdx !== -1 && minDist < 0.2) {
+                      const prev = prevFrameCentroidsRef.current[closestIdx];
+                      hand.centroid.x = lerp(prev.x, hand.centroid.x, 0.5);
+                      hand.centroid.y = lerp(prev.y, hand.centroid.y, 0.5);
+                   }
+                });
+             }
+             prevFrameCentroidsRef.current = sorted.map(h => ({ x: h.centroid.x, y: h.centroid.y }));
+
+             detectedHandsRef.current = sorted;
+             onHandsUpdate(sorted);
+          });
+          handsRef.current = hands;
       }
+
+      // 4. Detection Loop
+      const detect = async () => {
+         if (isCancelled) return;
+         if (video.readyState >= 2 && handsRef.current && !isDetectingRef.current) {
+            isDetectingRef.current = true;
+            try {
+               await handsRef.current.send({ image: video });
+            } catch (e) {
+               isDetectingRef.current = false;
+            }
+         }
+         detectReqRef.current = requestAnimationFrame(detect);
+      };
+      
+      if (detectReqRef.current) cancelAnimationFrame(detectReqRef.current);
+      detectReqRef.current = requestAnimationFrame(detect);
     };
 
-    initCamera();
+    initSystem();
 
     return () => {
       isCancelled = true;
-      if (camera) camera.stop();
-      if (hands) hands.close();
+      if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
+      if (detectReqRef.current) cancelAnimationFrame(detectReqRef.current);
+      // Do NOT close handsRef here to keep model loaded when just switching camera
+      // But we DO stop video tracks
+      if (videoRef.current && videoRef.current.srcObject) {
+         const stream = videoRef.current.srcObject as MediaStream;
+         stream.getTracks().forEach(t => t.stop());
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [facingMode]); // Re-run when facingMode changes
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
-      <video ref={videoRef} className="hidden" playsInline muted autoPlay />
-      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
+      {/* Error / Status Display */}
+      {errorMessage && (
+        <div className="absolute inset-0 flex items-center justify-center z-50 bg-black/90 p-6 text-center">
+           <div className="flex flex-col items-center gap-4">
+              <AlertTriangle className="w-12 h-12 text-red-500" />
+              <p className="text-white text-lg font-bold">오류가 발생했습니다</p>
+              <div className="bg-gray-800 p-4 rounded text-left w-full overflow-auto max-h-40">
+                <p className="text-red-300 font-mono text-xs">{errorMessage}</p>
+              </div>
+              <button 
+                onClick={() => window.location.reload()}
+                className="mt-4 px-6 py-2 bg-white text-black font-bold rounded-full flex items-center gap-2"
+              >
+                <RefreshCcw className="w-4 h-4" /> 다시 시도
+              </button>
+           </div>
+        </div>
+      )}
+
+      {/* Model Loading Indicator */}
+      {isLoadingModel && !errorMessage && (
+        <div className="absolute top-4 left-4 z-40 bg-black/60 backdrop-blur px-4 py-2 rounded-full flex items-center gap-3 border border-white/20">
+           <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
+           <span className="text-white text-sm font-bold">AI 모델 준비 중...</span>
+        </div>
+      )}
+      
+      {/* Camera Toggle Button */}
+      {!errorMessage && (
+        <button 
+          onClick={toggleCamera}
+          className="absolute top-4 right-4 z-50 p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full text-white border border-white/30 transition-all active:scale-95 shadow-lg"
+          aria-label="카메라 전환"
+        >
+          <SwitchCamera className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Debug Logs (Semi-transparent) */}
+      <div className="absolute bottom-4 left-4 z-50 pointer-events-none opacity-40 hover:opacity-100 transition-opacity">
+        <div className="bg-black/70 p-2 rounded text-[10px] text-green-400 font-mono max-w-[200px] overflow-hidden">
+           {debugLogs.map((log, i) => (
+              <div key={i} className="truncate">> {log}</div>
+           ))}
+        </div>
+      </div>
+
+      <video 
+        ref={videoRef} 
+        className="absolute top-0 left-0 w-full h-full object-cover -z-10 opacity-0" 
+        playsInline 
+        muted 
+        autoPlay 
+      />
+      
+      <canvas 
+        ref={canvasRef} 
+        className="absolute top-0 left-0 w-full h-full object-cover" 
+      />
     </div>
   );
 };
