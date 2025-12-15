@@ -30,17 +30,17 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // Tracking Configuration
-const MAX_TRACKING_DISTANCE = 0.3; 
-const FRAME_PERSISTENCE_THRESHOLD = 3; 
-const MAX_MISSING_FRAMES = 15; 
-// New: Minimum distance between two distinct detected inputs to be considered separate hands.
-// If two detections are closer than this (e.g. 10% of screen), we assume it's motion blur/ghosting.
-const MIN_SPATIAL_SEPARATION = 0.1; 
+const MAX_TRACKING_DISTANCE = 0.25; 
+const FRAME_PERSISTENCE_THRESHOLD = 2; // Lowered slightly to be more responsive
+const MAX_MISSING_FRAMES = 10; // Clean up faster
 
 // Visual Stabilization Config
-const POS_SMOOTHING_FACTOR = 0.3; 
+const POS_SMOOTHING_FACTOR = 0.4; // Slightly faster smoothing
 const FIST_CONFIDENCE_THRESHOLD = 0.6; 
-const FIST_CONFIDENCE_DECAY = 0.2; 
+const FIST_CONFIDENCE_DECAY = 0.25; 
+
+// Performance Config
+const GAME_LOGIC_UPDATE_INTERVAL_MS = 60; // ~15 FPS limit for React State updates
 
 let nextStableId = 0;
 
@@ -48,8 +48,8 @@ interface VisualState {
   x: number;
   y: number;
   lastSeen: number;
-  fistConfidence: number; // 0.0 (Open) to 1.0 (Fist)
-  isVisuallyFist: boolean; // Smoothed state
+  fistConfidence: number; 
+  isVisuallyFist: boolean;
 }
 
 const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
@@ -81,6 +81,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const winningIdsRef = useRef(winningStableIds);
   const triggerCaptureRef = useRef(triggerCapture);
   
+  // Performance Throttling Refs
+  const lastLogicUpdateTimeRef = useRef<number>(0);
+  const lastHandCountRef = useRef<number>(0);
+  
   // Data Refs
   const detectedHandsRef = useRef<DetectedHand[]>([]);
   
@@ -93,7 +97,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
       missingCount: number; 
   }[]>([]);
 
-  // Visual Smoothing Map (Persists even if hand is briefly lost)
+  // Visual Smoothing Map
   const visualStateMapRef = useRef<Map<number, VisualState>>(new Map());
   
   // Loop Control Refs
@@ -175,7 +179,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         return;
       }
 
-      // 2. Render Loop
+      // 2. Render Loop (Runs at Animation Frame Rate - 60fps)
       const render = () => {
         if (isCancelled) return;
 
@@ -240,7 +244,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
               const targetConf = hand.isFist ? 1.0 : 0.0;
               vState.fistConfidence = lerp(vState.fistConfidence, targetConf, FIST_CONFIDENCE_DECAY);
               
-              // Hysteresis for toggle
+              // Hysteresis
               if (vState.isVisuallyFist && vState.fistConfidence < (1 - FIST_CONFIDENCE_THRESHOLD)) {
                   vState.isVisuallyFist = false;
               } else if (!vState.isVisuallyFist && vState.fistConfidence > FIST_CONFIDENCE_THRESHOLD) {
@@ -249,22 +253,18 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            }
            visualMap.set(hand.stableId, vState);
 
-           // Draw Active Hands
+           // Draw
            const isWinner = currentWinningIds.includes(hand.stableId);
-           // Use the smoothed 'isVisuallyFist' instead of raw 'isFist' to prevent flickering
            drawHandOverlay(ctx, vState.x, vState.y, hand, currentGameState, idx, isWinner, vState.isVisuallyFist);
         });
 
-        // 2. Handle "Ghost" Winners (Winner hands that were lost briefly)
+        // 2. Handle "Ghost" Winners (Draw logic remains the same)
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    // Draw ghost if seen recently (e.g., within 0.8s)
                     if (vState && (now - vState.lastSeen < 800)) {
-                        // Draw winner ball at last known pos
-                        // We pass a dummy hand object or just draw the ball directly
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -273,7 +273,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup old visual states
+        // Cleanup
         for (const [id, state] of visualMap.entries()) {
             if (now - state.lastSeen > 2000) {
                 visualMap.delete(id);
@@ -309,7 +309,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 attempts++;
              }
              if (!window.Hands) {
-                setErrorMessage("AI 모델 스크립트 로드 실패");
+                setErrorMessage("AI 모델 로드 실패");
                 return;
              }
           }
@@ -322,7 +322,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
           hands.setOptions({
              maxNumHands: 4, 
              modelComplexity: 0, 
-             minDetectionConfidence: 0.6, 
+             minDetectionConfidence: 0.7, // Increased confidence to naturally filter weak ghosts
              minTrackingConfidence: 0.6
           });
 
@@ -332,9 +332,8 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
              const now = Date.now();
              
-             // --- Improved Tracking Logic ---
+             // --- Tracking Logic (Removed Spatial Deduplication) ---
              
-             // 1. Prepare inputs & SPATIAL DE-DUPLICATION (Fix for Motion Blur)
              const rawInputs: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks, i) => {
@@ -342,51 +341,30 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 });
              }
 
-             // De-duplicate: If two inputs are very close, keep only one.
-             // This prevents a single hand from being detected as two hands due to ghosting.
-             const uniqueInputs: typeof rawInputs = [];
-             rawInputs.forEach(input => {
-                const isGhost = uniqueInputs.some(existing => {
-                   const dist = Math.sqrt(Math.pow(existing.x - input.x, 2) + Math.pow(existing.y - input.y, 2));
-                   return dist < MIN_SPATIAL_SEPARATION;
-                });
-                
-                if (!isGhost) {
-                   uniqueInputs.push(input);
-                }
-             });
-
              const activeTracks = tracksRef.current;
-             
-             // Increment missing count for all tracks first
              activeTracks.forEach(t => t.missingCount++);
 
-             // 2. Calculate all possible distances (Greedy Matching)
+             // Greedy Match
              const matches: {trackIdx: number, inputIdx: number, dist: number}[] = [];
-             
              activeTracks.forEach((track, trackIdx) => {
-                 uniqueInputs.forEach((input, inputIdx) => {
-                     const dist = Math.sqrt(Math.pow(track.centroid.x - input.x, 2) + Math.pow(track.centroid.y - input.y, 2));
+                 rawInputs.forEach((input, inputIdx) => {
+                     const distSq = (track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2;
+                     const dist = Math.sqrt(distSq);
                      if (dist < MAX_TRACKING_DISTANCE) {
                          matches.push({trackIdx, inputIdx, dist});
                      }
                  });
              });
 
-             // 3. Sort matches by distance (ascending)
              matches.sort((a, b) => a.dist - b.dist);
 
-             // 4. Assign matches
              const matchedTrackIndices = new Set<number>();
              const matchedInputIndices = new Set<number>();
 
              matches.forEach(({trackIdx, inputIdx}) => {
                  if (matchedTrackIndices.has(trackIdx) || matchedInputIndices.has(inputIdx)) return;
-                 
-                 // Match found
                  const track = activeTracks[trackIdx];
-                 const input = uniqueInputs[inputIdx];
-                 
+                 const input = rawInputs[inputIdx];
                  track.centroid.x = input.x;
                  track.centroid.y = input.y;
                  track.lastSeen = now;
@@ -394,13 +372,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  track.missingCount = 0;
                  // @ts-ignore
                  track._tempMpIndex = input.index;
-
                  matchedTrackIndices.add(trackIdx);
                  matchedInputIndices.add(inputIdx);
              });
 
-             // 5. Create new tracks for unmatched inputs
-             uniqueInputs.forEach((input, idx) => {
+             // New Tracks
+             rawInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
                      activeTracks.push({
                          id: nextStableId++,
@@ -414,7 +391,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  }
              });
 
-             // 6. Filter & Export
+             // Filter & Process
              let validTracks = activeTracks.filter(t => t.missingCount < MAX_MISSING_FRAMES);
              tracksRef.current = validTracks;
 
@@ -435,11 +412,25 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  }
              });
 
-             // Sort Left to Right for UI index consistency
+             // Sort
              finalHands.sort((a, b) => a.centroid.x - b.centroid.x);
-
+             
+             // Update Internal Ref for Render Loop (AR is always 60fps)
              detectedHandsRef.current = finalHands;
-             onHandsUpdate(finalHands);
+
+             // --- OPTIMIZATION: Throttle React Updates ---
+             // Only update React State if:
+             // 1. Hand count changed (Critical for UI)
+             // 2. Enough time passed (15fps)
+             const shouldUpdate = 
+                 finalHands.length !== lastHandCountRef.current || 
+                 (now - lastLogicUpdateTimeRef.current > GAME_LOGIC_UPDATE_INTERVAL_MS);
+
+             if (shouldUpdate) {
+                lastHandCountRef.current = finalHands.length;
+                lastLogicUpdateTimeRef.current = now;
+                onHandsUpdate(finalHands);
+             }
           });
           handsRef.current = hands;
       }
@@ -548,7 +539,6 @@ function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, ha
   const labelOffset = size * 0.5 + 20 + (minDimension * 0.02);
 
   if (state === GameState.SHOW_WINNER && isWinner) {
-     // Use smoothed 'isVisuallyFist' to prevent flickering balls
      if (!isVisuallyFist) {
         drawWinnerBall(ctx, x, y, minDimension, false);
      }
@@ -574,7 +564,6 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, min
   const radius = minDimension * 0.15;
   const fontSize = Math.max(16, minDimension * 0.05); 
   
-  // Ghost fading
   ctx.globalAlpha = isGhost ? 0.6 : 1.0;
 
   const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 1.5);
@@ -635,3 +624,4 @@ function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y + 1);
 }
+
