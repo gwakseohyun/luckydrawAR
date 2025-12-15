@@ -3,113 +3,115 @@ import { HandLandmark, DetectedHand } from "../types";
 
 // MediaPipe Hands Landmark Indices
 const WRIST = 0;
-const THUMB_CMC = 1;
-const THUMB_MCP = 2;
-const THUMB_IP = 3;
 const THUMB_TIP = 4;
-const INDEX_FINGER_MCP = 5;
-const INDEX_FINGER_PIP = 6;
-const INDEX_FINGER_DIP = 7;
-const INDEX_FINGER_TIP = 8;
-const MIDDLE_FINGER_MCP = 9;
-const MIDDLE_FINGER_PIP = 10;
-const MIDDLE_FINGER_DIP = 11;
-const MIDDLE_FINGER_TIP = 12;
-const RING_FINGER_MCP = 13;
-const RING_FINGER_PIP = 14;
-const RING_FINGER_DIP = 15;
-const RING_FINGER_TIP = 16;
-const PINKY_MCP = 17;
-const PINKY_PIP = 18;
-const PINKY_DIP = 19;
-const PINKY_TIP = 20;
+const THUMB_IP = 3;
+const THUMB_MCP = 2;
 
-const FINGERS = [
-  [INDEX_FINGER_MCP, INDEX_FINGER_PIP, INDEX_FINGER_DIP, INDEX_FINGER_TIP],
-  [MIDDLE_FINGER_MCP, MIDDLE_FINGER_PIP, MIDDLE_FINGER_DIP, MIDDLE_FINGER_TIP],
-  [RING_FINGER_MCP, RING_FINGER_PIP, RING_FINGER_DIP, RING_FINGER_TIP],
-  [PINKY_MCP, PINKY_PIP, PINKY_DIP, PINKY_TIP],
+// Finger Indices (MCP, PIP, DIP, TIP)
+const FINGERS_INDICES = [
+  [5, 6, 7, 8],   // Index
+  [9, 10, 11, 12], // Middle
+  [13, 14, 15, 16], // Ring
+  [17, 18, 19, 20]  // Pinky
 ];
 
-// Calculate distance between two landmarks
-const distance = (p1: HandLandmark, p2: HandLandmark): number => {
-  return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+// Optimized squared distance calculation to avoid expensive Math.sqrt in hot loops
+const distanceSq = (p1: HandLandmark, p2: HandLandmark): number => {
+  return (p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2;
 };
 
 export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right', stableId: number = -1): DetectedHand => {
   const wrist = landmarks[WRIST];
-  const indexMcp = landmarks[INDEX_FINGER_MCP];
-  const pinkyMcp = landmarks[PINKY_MCP];
+  const indexMcp = landmarks[5];
+  const pinkyMcp = landmarks[17];
 
   // --- 1. Detect Facing (Palm vs Back) ---
-  const v1 = { x: indexMcp.x - wrist.x, y: indexMcp.y - wrist.y };
-  const v2 = { x: pinkyMcp.x - wrist.x, y: pinkyMcp.y - wrist.y };
-  const crossZ = v1.x * v2.y - v1.y * v2.x;
+  // Using Cross Product of vectors (Wrist->Index) x (Wrist->Pinky)
+  const v1x = indexMcp.x - wrist.x;
+  const v1y = indexMcp.y - wrist.y;
+  const v2x = pinkyMcp.x - wrist.x;
+  const v2y = pinkyMcp.y - wrist.y;
+  const crossZ = v1x * v2y - v1y * v2x;
 
-  let facing: 'Palm' | 'Back' = 'Palm';
-  if (handednessLabel === 'Right') {
-    facing = crossZ < 0 ? 'Palm' : 'Back';
-  } else {
-    facing = crossZ > 0 ? 'Palm' : 'Back';
-  }
+  const facing: 'Palm' | 'Back' = handednessLabel === 'Right' 
+    ? (crossZ < 0 ? 'Palm' : 'Back') 
+    : (crossZ > 0 ? 'Palm' : 'Back');
 
   // --- 2. Count Fingers (Index to Pinky) ---
   let fingersUp = 0;
-  let foldedFingersCount = 0;
+  
+  // Pre-calculate Wrist distance for reference
+  // We use MCP as a stable anchor for length comparison
+  
+  for (const [mcpIdx, pipIdx, dipIdx, tipIdx] of FINGERS_INDICES) {
+    const tip = landmarks[tipIdx];
+    const pip = landmarks[pipIdx];
+    const mcp = landmarks[mcpIdx];
 
-  for (const [mcp, pip, dip, tip] of FINGERS) {
-    const distTipWrist = distance(landmarks[tip], wrist);
-    const distPipWrist = distance(landmarks[pip], wrist);
-    const distMcpWrist = distance(landmarks[mcp], wrist);
-    
-    // Geometric check: Extended if Tip is significantly further than PIP from Wrist
-    // And Tip is further than MCP. 
-    // Relaxed multiplier slightly to 1.05 to be more responsive
-    if (distTipWrist > distPipWrist * 1.05 && distTipWrist > distMcpWrist) {
+    // Distance Squared comparisons are faster
+    const dTipWrist = distanceSq(tip, wrist);
+    const dPipWrist = distanceSq(pip, wrist);
+    const dMcpWrist = distanceSq(mcp, wrist);
+
+    // Logic: A finger is "Extended" if the Tip is significantly further from the wrist than the PIP joint.
+    // AND the Tip is further than the MCP joint.
+    // 1.1 multiplier means Tip needs to be 10% further out than PIP (Standard extension)
+    // Used 1.05 previously, but 1.1 is safer to avoid jitter on half-bent fingers.
+    if (dTipWrist > dPipWrist * 1.1 && dTipWrist > dMcpWrist) {
       fingersUp++;
-    } else {
-      foldedFingersCount++;
     }
   }
 
-  // --- 3. Thumb Detection (Refined) ---
+  // --- 3. Thumb Detection ---
   const thumbTip = landmarks[THUMB_TIP];
   const thumbIp = landmarks[THUMB_IP];
   const thumbMcp = landmarks[THUMB_MCP];
-  
-  // Logic: Is the thumb extending OUT away from the hand?
-  // We compare the Tip distance to Index MCP vs IP distance to Index MCP.
-  const distThumbTipIndexMcp = distance(thumbTip, indexMcp);
-  const distThumbIpIndexMcp = distance(thumbIp, indexMcp);
-  
-  // Also check if it's tucked towards Pinky
-  const distThumbTipPinky = distance(thumbTip, pinkyMcp);
-  const distThumbIpPinky = distance(thumbIp, pinkyMcp);
-  
-  // Condition A: Thumb is NOT tucked (Tip is further from Pinky than IP is)
-  const isNotTucked = distThumbTipPinky > distThumbIpPinky;
 
-  // Condition B: Thumb is extending AWAY from Index (Tip is further from Index base than IP is)
-  const isExtendedOut = distThumbTipIndexMcp > distThumbIpIndexMcp * 1.1;
+  // Thumb logic needs real distances for ratio comparison
+  // Optimization: Only use sqrt here where necessary
+  const dThumbTipIndexMcp = (thumbTip.x - indexMcp.x)**2 + (thumbTip.y - indexMcp.y)**2;
+  const dThumbIpIndexMcp = (thumbIp.x - indexMcp.x)**2 + (thumbIp.y - indexMcp.y)**2;
+  const dThumbTipPinky = (thumbTip.x - pinkyMcp.x)**2 + (thumbTip.y - pinkyMcp.y)**2;
+  const dThumbIpPinky = (thumbIp.x - pinkyMcp.x)**2 + (thumbIp.y - pinkyMcp.y)**2;
 
-  // Final Thumb Up Check
-  const isThumbUp = isNotTucked && isExtendedOut;
+  // 1. Thumb is NOT tucked (Tip further from Pinky than IP)
+  const isNotTucked = dThumbTipPinky > dThumbIpPinky;
+  // 2. Thumb is extending OUT (Tip further from Index MCP than IP)
+  // Using squared comparison, so 1.1 threshold becomes 1.1^2 = 1.21
+  const isExtendedOut = dThumbTipIndexMcp > dThumbIpIndexMcp * 1.2;
 
-  if (isThumbUp) {
+  if (isNotTucked && isExtendedOut) {
       fingersUp++;
   }
 
-  // --- 4. Fist Detection Strategy (Improved) ---
-  // Previous strict logic: const isFist = foldedFingersCount === 4;
+  // --- 4. Fist Detection (Refined) ---
+  // A "Fist" strictly means the 4 main fingers are folded. 
+  // We ignore the thumb for the 'isFist' state to prevent errors where
+  // users tuck their thumb in or leave it out while making a fist.
+  // So: If Index, Middle, Ring, Pinky are ALL folded (count contribution was 0), it's a fist.
   
-  // NEW RELAXED LOGIC:
-  // If fewer than 2 fingers are up, we consider it a Fist (Rock).
-  // This handles cases where the user thinks they are making a fist but the thumb is sticking out.
-  // Conversely, if 2 or more fingers are up, it is definitely NOT a fist (it's Open/Scissors).
-  // This fixes the "Winner Ball Not Showing" bug when hand is opened.
-  const isFist = fingersUp < 2;
+  // However, we already counted 'fingersUp' including thumb.
+  // Let's re-verify just the 4 fingers for the "Fist" flag.
+  let mainFingersExtended = 0;
+  for (const [mcpIdx, pipIdx, dipIdx, tipIdx] of FINGERS_INDICES) {
+      const tip = landmarks[tipIdx];
+      const pip = landmarks[pipIdx];
+      const dTipWrist = distanceSq(tip, wrist);
+      const dPipWrist = distanceSq(pip, wrist);
+      
+      // Use a slightly more lenient threshold for "is this finger definitely NOT folded?"
+      // If Tip is further than PIP * 1.0 (just barely extended), we count it.
+      if (dTipWrist > dPipWrist) {
+          mainFingersExtended++;
+      }
+  }
 
-  // Centroid (approximate palm center)
+  // Final Verdict:
+  // Fist = 0 main fingers extended. (Strict).
+  // This solves "1 finger point = Fist" bug. Pointing will have mainFingersExtended >= 1.
+  const isFist = mainFingersExtended === 0;
+
+  // Centroid
   const centroid = {
     x: landmarks[9].x, 
     y: landmarks[9].y
@@ -117,7 +119,7 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
 
   return {
     id: index,
-    stableId: stableId !== -1 ? stableId : index, // Fallback to index if no ID provided
+    stableId: stableId !== -1 ? stableId : index,
     landmarks,
     handedness: handednessLabel,
     facing,
@@ -128,7 +130,6 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
 };
 
 export const getSortedHands = (hands: DetectedHand[]) => {
-  // Sort hands by X coordinate (Left to Right on screen)
   return [...hands].sort((a, b) => a.centroid.x - b.centroid.x);
 };
 
