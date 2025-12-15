@@ -11,6 +11,7 @@ interface GameOverlayProps {
   timer: number;
   maxDuration?: number; 
   onReset: () => void;
+  onStartDetection?: () => void;
   onConfirmParticipants: () => void;
   warningMessage?: string | null;
   onOpenGallery?: () => void;
@@ -29,6 +30,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
   timer,
   maxDuration = 3, 
   onReset,
+  onStartDetection,
   onConfirmParticipants,
   warningMessage,
   onOpenGallery,
@@ -43,11 +45,54 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
 
   const isHolding = gameState === GameState.WAIT_FOR_FISTS_READY;
   const isDetecting = gameState === GameState.DETECT_PARTICIPANTS;
+  const isSetup = gameState === GameState.SETUP;
 
   const CIRCUMFERENCE = 377;
   const progress = Math.min(timer / maxDuration, 1);
   const strokeDashoffset = CIRCUMFERENCE - (CIRCUMFERENCE * progress);
   const displayTime = Math.ceil(maxDuration - timer);
+
+  // Setup Screen Overlay
+  if (isSetup) {
+      return (
+        <div className="absolute inset-0 z-50 flex items-center justify-center safe-area-inset bg-black/60 backdrop-blur-md animate-fade-in">
+           <div className="w-full max-w-md bg-gray-900 border border-white/10 rounded-3xl p-8 flex flex-col items-center gap-8 shadow-2xl">
+               <div className="text-center">
+                   <h1 className="text-3xl font-black text-yellow-400 mb-2">LUCKY DRAW AR</h1>
+                   <p className="text-gray-400 text-sm">이번 게임의 당첨 인원을 설정해주세요.</p>
+               </div>
+
+               <div className="flex flex-col items-center gap-3 w-full">
+                    <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">WINNERS</span>
+                    <div className="flex items-center justify-between w-full px-8">
+                       <button 
+                          onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(-1)}
+                          className="w-16 h-16 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all active:scale-95"
+                       >
+                          <Minus className="w-8 h-8" />
+                       </button>
+                       <span className="text-6xl font-black text-white tabular-nums tracking-tighter">
+                          {winnerCount}
+                       </span>
+                       <button 
+                          onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(1)}
+                          className="w-16 h-16 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black flex items-center justify-center shadow-[0_0_20px_rgba(250,204,21,0.4)] transition-all active:scale-95"
+                       >
+                          <Plus className="w-8 h-8" />
+                       </button>
+                    </div>
+               </div>
+
+               <button 
+                   onClick={onStartDetection}
+                   className="w-full py-4 bg-white text-black font-bold text-lg rounded-xl hover:bg-gray-100 active:scale-95 transition-all flex items-center justify-center gap-2 mt-4"
+               >
+                   <Play className="w-5 h-5 fill-black" /> 게임 시작
+               </button>
+           </div>
+        </div>
+      );
+  }
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between z-10 safe-area-inset">
@@ -109,24 +154,10 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                 <span className="text-2xl text-white font-bold drop-shadow-md mt-2">감지됨</span>
              </div>
 
-             {/* Winner Count Selector */}
-             <div className="pointer-events-auto bg-black/60 backdrop-blur-md rounded-2xl p-3 border border-white/10 shadow-xl flex flex-col items-center gap-2">
-                <span className="text-xs text-white/70 font-bold uppercase tracking-wider">당첨 인원</span>
-                <div className="flex items-center gap-4">
-                   <button 
-                      onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(-1)}
-                      className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/10 transition-all active:scale-95"
-                   >
-                      <Minus className="w-5 h-5" />
-                   </button>
-                   <span className="text-3xl font-black text-white w-12 text-center">{winnerCount}</span>
-                   <button 
-                      onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(1)}
-                      className="w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black flex items-center justify-center shadow-[0_0_10px_rgba(250,204,21,0.4)] transition-all active:scale-95"
-                   >
-                      <Plus className="w-5 h-5" />
-                   </button>
-                </div>
+             {/* Winner Count Display Only */}
+             <div className="bg-black/40 backdrop-blur-md rounded-full px-5 py-2 border border-white/10 shadow-lg flex items-center gap-2">
+                <span className="text-xs text-white/60 font-bold uppercase">당첨 인원</span>
+                <span className="text-lg font-black text-white">{winnerCount}명</span>
              </div>
           </div>
         )}
