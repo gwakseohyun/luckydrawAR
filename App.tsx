@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
 import { GameState, DetectedHand } from './types';
-import { X, RefreshCw, Info, Image as ImageIcon, ZoomIn } from 'lucide-react';
+import { X, RefreshCw, Info, Image as ImageIcon, ZoomIn, Download } from 'lucide-react';
 
 // Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
 interface GestureState {
@@ -96,15 +96,25 @@ const App: React.FC = () => {
     setShouldCapture(false);
   }, []);
 
+  const downloadImage = (src: string, index: number) => {
+    try {
+      const link = document.createElement('a');
+      link.href = src;
+      link.download = `lucky-draw-winner-${index + 1}-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      console.error("Download failed", e);
+    }
+  };
+
   // Central Game Loop
   useEffect(() => {
     const now = Date.now();
     const timeSinceStateChange = now - lastStateChangeTimeRef.current;
     
     // CRITICAL FIX: State Entry Cooldown
-    // Ignore all logic for the first 1.0 second after a state change.
-    // This allows users to read instructions and prevents accidental instant triggers 
-    // from previous hand positions.
     if (timeSinceStateChange < 1000) {
        return; 
     }
@@ -337,18 +347,32 @@ const App: React.FC = () => {
                {galleryImages.map((src, idx) => (
                  <div 
                     key={idx} 
-                    className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-yellow-400 aspect-video group cursor-zoom-in"
-                    onClick={() => setSelectedImage(src)}
+                    className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-yellow-400 aspect-video group"
                  >
                     <img 
                       src={src} 
                       alt={`Winner Moment ${idx + 1}`} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 cursor-zoom-in" 
+                      onClick={() => setSelectedImage(src)}
                     />
-                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <ZoomIn className="text-white w-10 h-10 drop-shadow-lg" />
+                    
+                    {/* Hover Actions */}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+                        <button 
+                           onClick={() => setSelectedImage(src)}
+                           className="p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur text-white transition-transform hover:scale-110"
+                        >
+                           <ZoomIn className="w-8 h-8" />
+                        </button>
+                        <button 
+                           onClick={() => downloadImage(src, idx)}
+                           className="p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur text-white transition-transform hover:scale-110"
+                        >
+                           <Download className="w-8 h-8" />
+                        </button>
                     </div>
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
+
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex justify-between items-end">
                        <span className="text-white font-bold">순간 포착 #{idx + 1}</span>
                     </div>
                  </div>
@@ -384,24 +408,38 @@ const App: React.FC = () => {
         {/* Lightbox (Full Screen Image View) */}
         {selectedImage && (
            <div 
-             className="absolute inset-0 z-50 bg-black/95 flex items-center justify-center p-4 cursor-zoom-out animate-fade-in"
+             className="absolute inset-0 z-50 bg-black/95 flex items-center justify-center p-4 animate-fade-in"
              onClick={() => setSelectedImage(null)}
            >
               <div className="relative max-w-full max-h-full">
                  <img 
                    src={selectedImage} 
                    alt="Full Screen" 
-                   className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl border border-gray-800"
+                   className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-gray-800"
                  />
-                 <button 
-                   className="absolute top-4 right-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 transition-colors"
-                   onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedImage(null);
-                   }}
-                 >
-                    <X className="w-8 h-8" />
-                 </button>
+                 
+                 {/* Lightbox Actions */}
+                 <div className="absolute top-4 right-4 flex gap-2">
+                     <button 
+                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
+                       onClick={(e) => {
+                          e.stopPropagation();
+                          const idx = galleryImages.indexOf(selectedImage);
+                          downloadImage(selectedImage, idx !== -1 ? idx : 0);
+                       }}
+                     >
+                        <Download className="w-6 h-6" />
+                     </button>
+                     <button 
+                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
+                       onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedImage(null);
+                       }}
+                     >
+                        <X className="w-6 h-6" />
+                     </button>
+                 </div>
               </div>
            </div>
         )}
