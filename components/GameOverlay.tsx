@@ -91,7 +91,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
       </div>
 
       {/* Center Feedback (Timer/Counts) */}
-      {/* Changed justify-center to justify-start and added pt-32 to move text up */}
       <div className="flex-1 flex flex-col items-center justify-start pt-32 pointer-events-none relative pb-20">
         
         {/* Big Counter */}
@@ -154,7 +153,7 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
              <div className="flex items-center gap-2 text-white">
                 <Info className="w-4 h-4 text-yellow-400" />
                 <span className="font-bold text-sm">
-                   {isDetecting ? "참가 인원 설정" : "게임 진행 안내"}
+                   진행 안내
                 </span>
              </div>
              <button className="text-white/50 hover:text-white">
