@@ -58,7 +58,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   gameState, 
   onHandsUpdate, 
   winningStableIds, 
-  triggerCapture,
+  triggerCapture, 
   onCaptureComplete,
   onZoomInit,
   onStreamReady
@@ -593,7 +593,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       )}
 
       {(!isStreamReady || isLoadingModel) && !errorMessage && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black p-6 animate-fade-in text-center safe-area-inset">
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black p-6 text-center">
             {!userConfirmed ? (
                 <>
                     <div className="relative mb-8">
@@ -632,7 +632,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       )}
 
       <video ref={videoRef} className="absolute top-0 left-0 w-full h-full object-cover -z-10 opacity-0" playsInline muted autoPlay />
-      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover" />
+      <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full object-cover z-0" />
     </div>
   );
 }));
