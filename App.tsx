@@ -330,7 +330,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="w-screen h-screen bg-gray-100 flex items-center justify-center relative">
+    <div className="w-screen h-[100dvh] bg-gray-100 flex items-center justify-center relative">
       <div className="relative w-full h-full max-w-[1920px] max-h-[1080px] bg-black shadow-2xl overflow-hidden">
         
         <CameraLayer 
