@@ -39,3 +39,4 @@ export interface CameraLayerHandle {
   toggleCamera: () => void;
   setZoom: (zoom: number) => void;
 }
+
