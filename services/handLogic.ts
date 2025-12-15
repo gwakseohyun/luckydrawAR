@@ -1,3 +1,4 @@
+
 import { HandLandmark, DetectedHand } from "../types";
 
 // MediaPipe Hands Landmark Indices
@@ -35,7 +36,7 @@ const distance = (p1: HandLandmark, p2: HandLandmark): number => {
   return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 };
 
-export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right'): DetectedHand => {
+export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right', stableId: number = -1): DetectedHand => {
   const wrist = landmarks[WRIST];
   const indexMcp = landmarks[INDEX_FINGER_MCP];
   const pinkyMcp = landmarks[PINKY_MCP];
@@ -115,6 +116,7 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
 
   return {
     id: index,
+    stableId: stableId !== -1 ? stableId : index, // Fallback to index if no ID provided
     landmarks,
     handedness: handednessLabel,
     facing,
