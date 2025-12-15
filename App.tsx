@@ -48,15 +48,6 @@ const App: React.FC = () => {
 
   useEffect(() => { participantCountRef.current = participantCount; }, [participantCount]);
 
-  useEffect(() => {
-    // Start in SETUP mode instead of DETECT directly
-    // Wait for initial render/mount then go to SETUP
-    const t = setTimeout(() => {
-        setGameState(GameState.SETUP);
-    }, 100);
-    return () => clearTimeout(t);
-  }, []);
-
   const changeState = useCallback((newState: GameState) => {
     setGameState(newState);
     lastStateChangeTimeRef.current = Date.now();
@@ -65,6 +56,16 @@ const App: React.FC = () => {
     lastValidConditionTimeRef.current = 0;
     setTimer(0);
     setWarningMessage(null);
+  }, []);
+
+  const handleStreamReady = useCallback(() => {
+    setGameState(prev => {
+        // Transition to SETUP only if we are currently in IDLE (waiting for permissions)
+        if (prev === GameState.IDLE) {
+            return GameState.SETUP;
+        }
+        return prev;
+    });
   }, []);
 
   const handleReset = useCallback(() => {
@@ -340,6 +341,7 @@ const App: React.FC = () => {
           triggerCapture={shouldCapture}
           onCaptureComplete={handleCaptureComplete}
           onZoomInit={handleZoomInit}
+          onStreamReady={handleStreamReady}
         />
         
         <GameOverlay 
