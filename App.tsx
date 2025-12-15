@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
@@ -133,7 +134,9 @@ const App: React.FC = () => {
     const now = Date.now();
     const timeSinceStateChange = now - lastStateChangeTimeRef.current;
     
-    if (timeSinceStateChange < 1000) {
+    // Reduced from 1000ms to 300ms to improve responsiveness.
+    // The previous 1s delay made the 3s timer feel like 4s.
+    if (timeSinceStateChange < 300) {
        return; 
     }
 
