@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GameState } from '../types';
 import { INSTRUCTIONS, COLORS } from '../constants';
-import { RefreshCw, Users, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCw, Users, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play } from 'lucide-react';
 
 interface GameOverlayProps {
   gameState: GameState;
@@ -15,6 +15,9 @@ interface GameOverlayProps {
   onOpenGallery?: () => void;
   galleryCount?: number;
   onToggleCamera?: () => void;
+  zoomCapabilities?: { min: number, max: number, step: number } | null;
+  currentZoom?: number;
+  onZoomChange?: (value: number) => void;
 }
 
 const GameOverlay: React.FC<GameOverlayProps> = ({
@@ -28,7 +31,10 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
   warningMessage,
   onOpenGallery,
   galleryCount = 0,
-  onToggleCamera
+  onToggleCamera,
+  zoomCapabilities,
+  currentZoom = 1,
+  onZoomChange
 }) => {
   const [isInstructionExpanded, setIsInstructionExpanded] = useState(true);
 
@@ -182,50 +188,92 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
 
                 {/* Actions Grid */}
                 <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-                    {/* Primary Action */}
+                    {/* Primary Action (Main Slot: Zoom or Status) */}
                     <div className="w-full">
-                        {isDetecting && (
+                        {isDetecting ? (
                            <>
-                             {participantCount >= 2 ? (
-                               <button 
-                                 onClick={onConfirmParticipants}
-                                 className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                               >
-                                 {participantCount}명으로 시작하기 <Users className="w-4 h-4"/>
-                               </button>
+                             {zoomCapabilities ? (
+                                <div className="w-full bg-white/5 border border-white/5 rounded-xl h-[48px] px-4 flex items-center gap-3">
+                                   <ZoomOut className="w-4 h-4 text-white/50" />
+                                   <div className="flex-1 relative h-6 flex items-center">
+                                       {/* Visual Ticks Track */}
+                                       <div className="absolute inset-0 flex justify-between items-center px-1 pointer-events-none opacity-20">
+                                           {Array.from({length: 11}).map((_, i) => (
+                                               <div key={i} className={`w-[1px] bg-white ${i % 5 === 0 ? 'h-3' : 'h-1.5'}`}></div>
+                                           ))}
+                                       </div>
+                                       <input 
+                                          type="range" 
+                                          min={zoomCapabilities.min} 
+                                          max={zoomCapabilities.max} 
+                                          step={zoomCapabilities.step} 
+                                          value={currentZoom}
+                                          onChange={(e) => onZoomChange && onZoomChange(parseFloat(e.target.value))}
+                                          className="w-full h-full opacity-0 absolute z-20 cursor-pointer"
+                                       />
+                                       {/* Custom Thumb/Track Visualization */}
+                                       <div className="w-full h-0.5 bg-white/20 rounded-full relative z-10 overflow-visible">
+                                           <div 
+                                              className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-yellow-400 rounded-full shadow-[0_0_10px_rgba(250,204,21,0.5)] transition-all"
+                                              style={{ 
+                                                  left: `${((currentZoom - zoomCapabilities.min) / (zoomCapabilities.max - zoomCapabilities.min)) * 100}%`,
+                                                  transform: 'translate(-50%, -50%)'
+                                              }}
+                                           />
+                                       </div>
+                                   </div>
+                                   <ZoomIn className="w-4 h-4 text-white/50" />
+                                </div>
+                             ) : (
+                                <div className="w-full bg-white/5 text-white/30 font-bold py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                                    {participantCount >= 2 ? "시작 버튼을 눌러주세요" : "인원 모으는 중..."}
+                                </div>
+                             )}
+                           </>
+                        ) : (
+                           // Non-Detection Phase: Status or Gallery
+                           <>
+                            {gameState === GameState.SHOW_WINNER ? (
+                                <button 
+                                    onClick={onOpenGallery}
+                                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <ImageIcon className="w-4 h-4" /> 결과 보기 
+                                    {galleryCount > 0 && <span className="bg-red-600 text-white text-[10px] px-1.5 rounded-full">{galleryCount}</span>}
+                                </button>
                             ) : (
-                               <div className="w-full bg-white/5 text-white/30 font-bold py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
-                                 인원 모으는 중...
+                               <div className="w-full bg-white/5 text-white/50 py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                                  제스처를 인식하고 있습니다...
                                </div>
                             )}
                            </>
                         )}
-                        
-                        {gameState === GameState.SHOW_WINNER && (
-                            <button 
-                                onClick={onOpenGallery}
-                                className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                            >
-                                <ImageIcon className="w-4 h-4" /> 결과 보기 
-                                {galleryCount > 0 && <span className="bg-red-600 text-white text-[10px] px-1.5 rounded-full">{galleryCount}</span>}
-                            </button>
-                        )}
-
-                        {!isDetecting && gameState !== GameState.SHOW_WINNER && (
-                           <div className="w-full bg-white/5 text-white/50 py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
-                              제스처를 인식하고 있습니다...
-                           </div>
-                        )}
                     </div>
 
-                    {/* Secondary Action (Reset) */}
-                    <button 
-                        onClick={onReset}
-                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px] py-2"
-                    >
-                        <RefreshCw className="w-4 h-4 mt-0.5" />
-                        <span className="text-[10px] whitespace-nowrap">다시 시작</span>
-                    </button>
+                    {/* Secondary Action (Right Slot: Start OR Reset) */}
+                    {isDetecting ? (
+                         <button 
+                             onClick={onConfirmParticipants}
+                             disabled={participantCount < 2}
+                             className={`
+                                h-full px-5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all min-w-[70px] py-2
+                                ${participantCount >= 2 
+                                   ? 'bg-yellow-400 border-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.4)] hover:bg-yellow-300 active:scale-95' 
+                                   : 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed'}
+                             `}
+                         >
+                             <Play className={`w-4 h-4 mt-0.5 ${participantCount >= 2 ? 'fill-black' : ''}`} />
+                             <span className="text-[10px] whitespace-nowrap font-bold">시작</span>
+                         </button>
+                    ) : (
+                        <button 
+                            onClick={onReset}
+                            className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px] py-2"
+                        >
+                            <RefreshCw className="w-4 h-4 mt-0.5" />
+                            <span className="text-[10px] whitespace-nowrap">다시 시작</span>
+                        </button>
+                    )}
                 </div>
              </div>
           )}
