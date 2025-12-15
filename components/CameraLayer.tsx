@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -531,34 +530,46 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 export default CameraLayer;
 
 function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, hand: DetectedHand, state: GameState, sortedIndex: number, isWinner: boolean) {
-  const size = 100;
-  ctx.lineWidth = 4;
+  // Dynamic scaling based on the smallest screen dimension (Landscape height or Portrait width)
+  const minDimension = Math.min(ctx.canvas.width, ctx.canvas.height);
   
+  // Box size approx 25% of the smallest screen dimension
+  const size = minDimension * 0.25; 
+  const strokeWidth = Math.max(2, minDimension * 0.008); // Scale stroke
+  const cornerRadius = size * 0.2; // Rounded corners relative to box
+  
+  ctx.lineWidth = strokeWidth;
+  
+  // Calculate relative offset for labels
+  const labelOffset = size * 0.5 + 20 + (minDimension * 0.02);
+
   if (state === GameState.SHOW_WINNER && isWinner) {
      if (!hand.isFist) {
-        drawWinnerBall(ctx, x, y);
+        drawWinnerBall(ctx, x, y, minDimension);
      }
   } else if (state === GameState.DETECT_PARTICIPANTS) {
       ctx.strokeStyle = COLORS.primary;
-      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, 15);
-      // Use sortedIndex for display order, but the logic underlying this is stable due to stableId
-      drawLabel(ctx, x, y - size/2 - 20, `#${sortedIndex + 1}`, COLORS.primary);
+      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
+      drawLabel(ctx, x, y - labelOffset, `#${sortedIndex + 1}`, COLORS.primary, minDimension);
   } else if (state === GameState.WAIT_FOR_FISTS_READY || state === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
       const color = hand.isFist ? COLORS.success : COLORS.accent;
       ctx.strokeStyle = color;
-      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, 15);
+      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
       if (!hand.isFist) {
-        drawLabel(ctx, x, y + size/2 + 20, "주먹 쥐세요", COLORS.accent);
+        drawLabel(ctx, x, y + labelOffset, "주먹 쥐세요", COLORS.accent, minDimension);
       }
   } else if (state === GameState.SET_WINNER_COUNT) {
       ctx.strokeStyle = COLORS.primary;
-      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, 15);
-      drawLabel(ctx, x, y - size/2 - 20, `${hand.fingerCount}명`, COLORS.primary);
+      drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
+      drawLabel(ctx, x, y - labelOffset, `${hand.fingerCount}명`, COLORS.primary, minDimension);
   }
 }
 
-function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number) {
-  const radius = 40; 
+function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, minDimension: number) {
+  // Winner ball is roughly 15% radius (30% diameter) of min screen dimension
+  const radius = minDimension * 0.15;
+  const fontSize = Math.max(16, minDimension * 0.05); // Scale font
+  
   const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 1.5);
   gradient.addColorStop(0, 'rgba(255, 234, 0, 0.9)');
   gradient.addColorStop(1, 'rgba(255, 234, 0, 0)');
@@ -566,15 +577,18 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.beginPath();
   ctx.arc(x, y, radius * 1.5, 0, 2 * Math.PI);
   ctx.fill();
+  
   ctx.fillStyle = COLORS.primary;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, 2 * Math.PI);
   ctx.fill();
+  
   ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 3;
+  ctx.lineWidth = Math.max(2, minDimension * 0.01);
   ctx.stroke();
+  
   ctx.fillStyle = '#000000';
-  ctx.font = '900 16px Pretendard';
+  ctx.font = `900 ${fontSize}px Pretendard`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('WINNER', x, y);
@@ -593,18 +607,25 @@ function drawRoundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.stroke();
 }
 
-function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, bgColor: string) {
-  ctx.font = 'bold 16px Pretendard';
+function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, bgColor: string, minDimension: number) {
+  // Scale font size based on screen
+  const fontSize = Math.max(14, minDimension * 0.045); 
+  ctx.font = `bold ${fontSize}px Pretendard`;
+  
   const metrics = ctx.measureText(text);
-  const padding = 10;
-  const bgW = metrics.width + padding * 2;
-  const bgH = 30;
+  const paddingH = fontSize * 0.6;
+  const paddingV = fontSize * 0.4;
+  
+  const bgW = metrics.width + paddingH * 2;
+  const bgH = fontSize + paddingV * 2;
+  
   ctx.fillStyle = bgColor;
   ctx.beginPath();
-  ctx.roundRect(x - bgW / 2, y - bgH / 2, bgW, bgH, 8);
+  ctx.roundRect(x - bgW / 2, y - bgH / 2, bgW, bgH, bgH * 0.3);
   ctx.fill();
+  
   ctx.fillStyle = '#000000';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, x, y);
-}
+  ctx.fillText(text, x, y + 1); // +1 for visual centering
+                     }
