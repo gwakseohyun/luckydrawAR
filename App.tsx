@@ -88,7 +88,12 @@ const App: React.FC = () => {
   }, [changeState]);
 
   const handleConfirmParticipants = useCallback(() => {
-    if (participantCountRef.current < 2) return;
+    // Ensure participants > winnerCount
+    if (participantCountRef.current <= winnerCount) {
+        setWarningMessage(`참가자는 ${winnerCount + 1}명 이상이어야 합니다.`);
+        return;
+    }
+
     setGameState(prev => {
       if (prev === GameState.DETECT_PARTICIPANTS) {
         lastStateChangeTimeRef.current = Date.now();
@@ -96,7 +101,7 @@ const App: React.FC = () => {
       }
       return prev;
     });
-  }, []);
+  }, [winnerCount]);
 
   const updateWinnerCount = useCallback((delta: number) => {
     setWinnerCount(prev => {
@@ -178,7 +183,8 @@ const App: React.FC = () => {
           if (facing === 'Back') {
              nextStep = 0; 
              if (gameState === GameState.DETECT_PARTICIPANTS) {
-                if (detectedHands.length >= 2) handleConfirmParticipants();
+                // Must have more participants than winners to start
+                if (detectedHands.length > winnerCount) handleConfirmParticipants();
              }
           }
         }
@@ -237,9 +243,6 @@ const App: React.FC = () => {
       case GameState.DETECT_PARTICIPANTS:
         if (detectedHands.length > 0) {
            setParticipantCount(detectedHands.length);
-           // NOTE: We no longer auto-clamp winnerCount here. 
-           // Winner Count is set in SETUP state and acts as a "Target".
-           // Only clamping happens at draw time.
         }
         break;
 
@@ -358,6 +361,7 @@ const App: React.FC = () => {
           onUpdateWinnerCount={updateWinnerCount}
         />
 
+        {/* ... (Modal code remains unchanged) ... */}
         {isGalleryOpen && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
             <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
