@@ -1,455 +1,118 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import CameraLayer from './components/CameraLayer';
-import GameOverlay from './components/GameOverlay';
-import { GameState, DetectedHand, CameraLayerHandle } from './types';
-import { X, RefreshCw, ZoomIn, Download } from 'lucide-react';
+import { HandLandmark, DetectedHand } from "../types";
 
-// Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
-interface GestureState {
-  step: number;
-  lastTime: number;
-}
+// MediaPipe Hands Landmark Indices
+const WRIST = 0;
+const THUMB_CMC = 1;
+const THUMB_MCP = 2;
+const THUMB_IP = 3;
+const THUMB_TIP = 4;
 
-const App: React.FC = () => {
-  const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
-  const [participantCount, setParticipantCount] = useState(0);
-  const [winnerCount, setWinnerCount] = useState(1);
-  const [detectedHands, setDetectedHands] = useState<DetectedHand[]>([]);
-  const [winningStableIds, setWinningStableIds] = useState<number[]>([]);
-  const [warningMessage, setWarningMessage] = useState<string | null>(null);
-  
-  // Logic Timers
-  const [timer, setTimer] = useState(0); // in seconds
-  const [maxTimerDuration, setMaxTimerDuration] = useState(3);
-  
-  const holdStartTimeRef = useRef<number | null>(null);
-  const lastValidConditionTimeRef = useRef<number>(0);
-  const candidateWinnerCountRef = useRef<number | null>(null);
-  
-  // Capture Logic
-  const [shouldCapture, setShouldCapture] = useState(false);
-  const [galleryImages, setGalleryImages] = useState<string[]>([]);
-  const [capturedWinnerIds, setCapturedWinnerIds] = useState<Set<number>>(new Set());
-  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null); 
+// Finger Indices (MCP, PIP, DIP, TIP)
+const FINGERS_INDICES = [
+  [5, 6, 7, 8],   // Index
+  [9, 10, 11, 12], // Middle
+  [13, 14, 15, 16], // Ring
+  [17, 18, 19, 20]  // Pinky
+];
 
-  // Zoom Logic
-  const [zoomCaps, setZoomCaps] = useState<{min: number, max: number, step: number} | null>(null);
-  const [currentZoom, setCurrentZoom] = useState<number>(1);
-
-  // Gesture Tracking Refs
-  const handGestureStates = useRef<Map<number, GestureState>>(new Map());
-  const lastStateChangeTimeRef = useRef<number>(Date.now());
-  const participantCountRef = useRef(participantCount);
-  
-  // Camera Ref
-  const cameraLayerRef = useRef<CameraLayerHandle>(null);
-
-  useEffect(() => { participantCountRef.current = participantCount; }, [participantCount]);
-
-  useEffect(() => {
-    setGameState(GameState.DETECT_PARTICIPANTS);
-  }, []);
-
-  const changeState = useCallback((newState: GameState) => {
-    setGameState(newState);
-    lastStateChangeTimeRef.current = Date.now();
-    
-    holdStartTimeRef.current = null;
-    candidateWinnerCountRef.current = null;
-    lastValidConditionTimeRef.current = 0;
-    setTimer(0);
-    setWarningMessage(null);
-  }, []);
-
-  const handleReset = useCallback(() => {
-    changeState(GameState.DETECT_PARTICIPANTS);
-    setParticipantCount(0);
-    setWinnerCount(1);
-    setWinningStableIds([]);
-    setGalleryImages([]);
-    setCapturedWinnerIds(new Set());
-    setIsGalleryOpen(false);
-    setSelectedImage(null);
-    setShouldCapture(false);
-    handGestureStates.current.clear();
-  }, [changeState]);
-
-  const handleConfirmParticipants = useCallback(() => {
-    if (participantCountRef.current < 2) return;
-    setGameState(prev => {
-      if (prev === GameState.DETECT_PARTICIPANTS) {
-        lastStateChangeTimeRef.current = Date.now();
-        return GameState.WAIT_FOR_FISTS_READY;
-      }
-      return prev;
-    });
-  }, []);
-
-  const handleCaptureComplete = useCallback((images: string[]) => {
-    if (images.length > 0) {
-       setGalleryImages(prev => [...prev, ...images]);
-    }
-    setShouldCapture(false);
-  }, []);
-
-  const downloadImage = (src: string, index: number) => {
-    try {
-      const link = document.createElement('a');
-      link.href = src;
-      link.download = `lucky-draw-winner-${index + 1}-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (e) {
-      console.error("Download failed", e);
-    }
-  };
-
-  const handleToggleCamera = useCallback(() => {
-    if (cameraLayerRef.current) {
-       cameraLayerRef.current.toggleCamera();
-    }
-  }, []);
-
-  const handleZoomInit = useCallback((min: number, max: number, step: number, current: number) => {
-    setZoomCaps({min, max, step});
-    setCurrentZoom(current);
-  }, []);
-
-  const handleZoomChange = useCallback((val: number) => {
-    setCurrentZoom(val);
-    if (cameraLayerRef.current) {
-        cameraLayerRef.current.setZoom(val);
-    }
-  }, []);
-
-  // Central Game Loop
-  useEffect(() => {
-    const now = Date.now();
-    const timeSinceStateChange = now - lastStateChangeTimeRef.current;
-    
-    if (timeSinceStateChange < 1000) {
-       return; 
-    }
-
-    const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
-
-    if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
-      detectedHands.forEach((hand) => {
-        let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
-        
-        if (gState.step > 0 && now - gState.lastTime > 1200) { 
-          gState = { step: 0, lastTime: now };
-        }
-
-        const facing = hand.facing;
-        let nextStep = gState.step;
-
-        if (gState.step === 0) {
-          if (facing === 'Palm') nextStep = 1;
-        } else if (gState.step === 1) { 
-          if (facing === 'Back') nextStep = 2; 
-        } else if (gState.step === 2) { 
-          if (facing === 'Palm') nextStep = 3;
-        } else if (gState.step === 3) { 
-          if (facing === 'Back') {
-             nextStep = 0; 
-             if (gameState === GameState.DETECT_PARTICIPANTS) {
-                if (detectedHands.length >= 2) handleConfirmParticipants();
-             }
-          }
-        }
-
-        if (nextStep !== gState.step) {
-          handGestureStates.current.set(hand.stableId, { step: nextStep, lastTime: now });
-        } else {
-           handGestureStates.current.set(hand.stableId, gState);
-        }
-      });
-      
-      // Cleanup missing hands from gesture map
-      const currentStableIds = new Set(detectedHands.map(h => h.stableId));
-      for (const id of handGestureStates.current.keys()) {
-          if (!currentStableIds.has(id)) {
-              handGestureStates.current.delete(id);
-          }
-      }
-    }
-
-    if (isGalleryOpen || selectedImage) return;
-
-    const updateTimerWithGracePeriod = (conditionMet: boolean, requiredTimeMs: number, onSuccess: () => void) => {
-       if (maxTimerDuration !== requiredTimeMs / 1000) {
-          setMaxTimerDuration(requiredTimeMs / 1000);
-       }
-
-       if (conditionMet) {
-          lastValidConditionTimeRef.current = now;
-          if (!holdStartTimeRef.current) holdStartTimeRef.current = now;
-          
-          const elapsed = now - holdStartTimeRef.current;
-          setTimer(elapsed / 1000);
-
-          if (elapsed > requiredTimeMs) {
-             onSuccess();
-          }
-       } else {
-          if (now - lastValidConditionTimeRef.current > 500) {
-             holdStartTimeRef.current = null;
-             setTimer(0);
-          }
-       }
-    };
-
-    if (detectedHands.length === 0) {
-      if (gameState === GameState.DETECT_PARTICIPANTS) {
-        setParticipantCount(0);
-      }
-      if (gameState === GameState.WAIT_FOR_FISTS_READY || gameState === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
-         setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
-      }
-    }
-
-    switch (gameState) {
-      case GameState.DETECT_PARTICIPANTS:
-        if (detectedHands.length > 0) {
-           setParticipantCount(detectedHands.length);
-        }
-        break;
-
-      case GameState.WAIT_FOR_FISTS_READY: {
-        const fistCount = detectedHands.filter(h => h.isFist).length;
-        const total = detectedHands.length;
-        const isAllParticipantsVisible = total >= participantCount;
-        const isAllFists = fistCount >= participantCount;
-        
-        const condition = isAllParticipantsVisible && isAllFists;
-
-        if (!isAllParticipantsVisible) {
-           setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
-        } else if (!isAllFists) {
-           setWarningMessage("모두 주먹을 쥐어주세요.");
-        } else {
-           setWarningMessage(null);
-        }
-
-        updateTimerWithGracePeriod(condition, 3000, () => {
-           changeState(GameState.SET_WINNER_COUNT);
-        });
-        break;
-      }
-
-      case GameState.SET_WINNER_COUNT: {
-        const totalFingers = detectedHands.reduce((acc, hand) => acc + hand.fingerCount, 0);
-        const maxAllowed = Math.max(1, participantCount - 1);
-        const isValidCount = totalFingers >= 1 && totalFingers <= maxAllowed;
-
-        if (totalFingers === 0) setWarningMessage("최소 1명 이상이어야 합니다.");
-        else if (totalFingers >= participantCount) setWarningMessage(`참가자 수(${participantCount}명)보다 적어야 합니다.`);
-        else setWarningMessage(null);
-
-        const isCountStable = isValidCount && candidateWinnerCountRef.current === totalFingers;
-
-        if (isValidCount && candidateWinnerCountRef.current !== totalFingers) {
-           candidateWinnerCountRef.current = totalFingers;
-           holdStartTimeRef.current = now;
-           lastValidConditionTimeRef.current = now;
-           setTimer(0);
-           setWinnerCount(totalFingers);
-        } else {
-           updateTimerWithGracePeriod(isCountStable, 3000, () => {
-              setWinnerCount(totalFingers);
-              changeState(GameState.WAIT_FOR_FISTS_PRE_DRAW);
-           });
-        }
-        break;
-      }
-
-      case GameState.WAIT_FOR_FISTS_PRE_DRAW: {
-        const fistCount = detectedHands.filter(h => h.isFist).length;
-        const total = detectedHands.length;
-        const isAllParticipantsVisible = total >= participantCount;
-        const isAllFists = fistCount >= participantCount;
-        
-        const condition = isAllParticipantsVisible && isAllFists;
-
-        if (!isAllParticipantsVisible) {
-           setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
-        } else if (!isAllFists) {
-           setWarningMessage("모두 주먹을 쥐어주세요.");
-        } else {
-           setWarningMessage(null);
-        }
-
-        updateTimerWithGracePeriod(condition, 3000, () => {
-             changeState(GameState.DRAWING);
-             performDraw();
-        });
-        break;
-      }
-      
-      case GameState.DRAWING:
-        break;
-
-      case GameState.SHOW_WINNER: {
-        let newCaptureTriggered = false;
-        const newCapturedIds = new Set(capturedWinnerIds);
-
-        detectedHands.forEach(hand => {
-           if (winningStableIds.includes(hand.stableId)) {
-               if (!hand.isFist && !capturedWinnerIds.has(hand.stableId)) {
-                  newCapturedIds.add(hand.stableId);
-                  newCaptureTriggered = true;
-               }
-           }
-        });
-
-        if (newCaptureTriggered) {
-           setCapturedWinnerIds(newCapturedIds);
-           setShouldCapture(true);
-        }
-        break;
-      }
-    }
-  }, [detectedHands, gameState, winnerCount, participantCount, handleConfirmParticipants, handleReset, changeState, isGalleryOpen, winningStableIds, capturedWinnerIds, timer, selectedImage, maxTimerDuration]);
-
-  const performDraw = () => {
-    const currentHandCount = detectedHands.length;
-    const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
-    const countToSelect = Math.min(winnerCount, poolSize);
-    
-    const indices = Array.from({ length: poolSize }, (_, i) => i);
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    
-    const winningIndices = indices.slice(0, countToSelect);
-    
-    // Freeze winners by stableId
-    const winningIds = winningIndices.map(idx => {
-       if (detectedHands[idx]) return detectedHands[idx].stableId;
-       return -1;
-    }).filter(id => id !== -1);
-    
-    setWinningStableIds(winningIds);
-    changeState(GameState.SHOW_WINNER);
-  };
-
-  return (
-    <div className="w-screen h-screen bg-gray-100 flex items-center justify-center relative">
-      <div className="relative w-full h-full max-w-[1920px] max-h-[1080px] bg-black shadow-2xl overflow-hidden">
-        
-        <CameraLayer 
-          ref={cameraLayerRef}
-          gameState={gameState} 
-          onHandsUpdate={setDetectedHands} 
-          winningStableIds={winningStableIds}
-          triggerCapture={shouldCapture}
-          onCaptureComplete={handleCaptureComplete}
-          onZoomInit={handleZoomInit}
-        />
-        
-        <GameOverlay 
-          gameState={gameState}
-          participantCount={participantCount}
-          winnerCount={winnerCount}
-          timer={timer}
-          maxDuration={maxTimerDuration} 
-          onReset={handleReset}
-          onConfirmParticipants={handleConfirmParticipants}
-          warningMessage={warningMessage}
-          onOpenGallery={() => setIsGalleryOpen(true)}
-          galleryCount={galleryImages.length}
-          onToggleCamera={handleToggleCamera}
-          zoomCapabilities={zoomCaps}
-          currentZoom={currentZoom}
-          onZoomChange={handleZoomChange}
-        />
-
-        {isGalleryOpen && (
-          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
-            <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
-               {galleryImages.map((src, idx) => (
-                 <div 
-                    key={idx} 
-                    className="relative aspect-video group cursor-pointer"
-                    onClick={() => setSelectedImage(src)}
-                 >
-                    <img 
-                      src={src} 
-                      alt={`Winner Moment ${idx + 1}`} 
-                      className="w-full h-full object-cover transition-opacity hover:opacity-90" 
-                    />
-                    <div className="absolute bottom-2 right-2 bg-black/50 px-2 py-0.5 text-white text-xs font-mono">
-                       #{idx + 1}
-                    </div>
-                 </div>
-               ))}
-               {galleryImages.length === 0 && (
-                  <div className="col-span-full text-white/50 text-center py-20 text-lg">
-                     아직 포착된 당첨 순간이 없습니다.
-                  </div>
-               )}
-            </div>
-            <div className="mt-8 w-full max-w-xs flex flex-col gap-3">
-                 <button 
-                   onClick={handleReset}
-                   className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-black text-lg font-bold rounded-xl shadow-lg active:scale-95 whitespace-nowrap"
-                 >
-                   <RefreshCw className="w-5 h-5" /> 다시 시작하기
-                 </button>
-                 <button 
-                   onClick={() => setIsGalleryOpen(false)}
-                   className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white/20 hover:bg-white/30 text-white font-bold rounded-xl backdrop-blur-md transition-colors whitespace-nowrap"
-                 >
-                   <X className="w-5 h-5" /> 닫기
-                 </button>
-            </div>
-          </div>
-        )}
-
-        {selectedImage && (
-           <div 
-             className="absolute inset-0 z-50 bg-black flex items-center justify-center animate-fade-in"
-             onClick={() => setSelectedImage(null)}
-           >
-              <div className="relative w-full h-full flex items-center justify-center p-4">
-                 <img 
-                   src={selectedImage} 
-                   alt="Full Screen" 
-                   className="max-w-full max-h-full object-contain"
-                 />
-                 <div className="absolute top-4 right-4 flex gap-3">
-                     <button 
-                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
-                       onClick={(e) => {
-                          e.stopPropagation();
-                          const idx = galleryImages.indexOf(selectedImage);
-                          downloadImage(selectedImage, idx !== -1 ? idx : 0);
-                       }}
-                     >
-                        <Download className="w-6 h-6" />
-                     </button>
-                     <button 
-                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
-                       onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedImage(null);
-                       }}
-                     >
-                        <X className="w-6 h-6" />
-                     </button>
-                 </div>
-              </div>
-           </div>
-        )}
-      </div>
-    </div>
-  );
+// Optimized squared distance calculation
+const distanceSq = (p1: HandLandmark, p2: HandLandmark): number => {
+  return (p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2;
 };
 
-export default App;
+export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right', stableId: number = -1): DetectedHand => {
+  const wrist = landmarks[WRIST];
+  const indexMcp = landmarks[5];
+  const pinkyMcp = landmarks[17];
+
+  // --- 1. Detect Facing (Palm vs Back) ---
+  // Using Cross Product of vectors (Wrist->Index) x (Wrist->Pinky)
+  // Z-coordinate check determines palm direction relative to camera
+  const v1x = indexMcp.x - wrist.x;
+  const v1y = indexMcp.y - wrist.y;
+  const v2x = pinkyMcp.x - wrist.x;
+  const v2y = pinkyMcp.y - wrist.y;
+  const crossZ = v1x * v2y - v1y * v2x;
+
+  const facing: 'Palm' | 'Back' = handednessLabel === 'Right' 
+    ? (crossZ < 0 ? 'Palm' : 'Back') 
+    : (crossZ > 0 ? 'Palm' : 'Back');
+
+  // --- 2. Count Fingers (Index to Pinky) ---
+  let fingersUp = 0;
+  
+  for (const [mcpIdx, pipIdx, _, tipIdx] of FINGERS_INDICES) {
+    const tip = landmarks[tipIdx];
+    const pip = landmarks[pipIdx];
+    const mcp = landmarks[mcpIdx];
+
+    // Distance Squared comparisons
+    const dTipWrist = distanceSq(tip, wrist);
+    const dPipWrist = distanceSq(pip, wrist);
+    const dMcpWrist = distanceSq(mcp, wrist);
+
+    // Logic: A finger is "Extended" if Tip is further from wrist than PIP (by 10% margin) AND Tip is further than MCP.
+    if (dTipWrist > dPipWrist * 1.1 && dTipWrist > dMcpWrist) {
+      fingersUp++;
+    }
+  }
+
+  // --- 3. Thumb Detection ---
+  const thumbTip = landmarks[THUMB_TIP];
+  const thumbIp = landmarks[THUMB_IP];
+  
+  // Thumb logic needs real distances ratio comparison, but we can do it with squares
+  // 1.1 threshold squared is ~1.21
+  const dThumbTipIndexMcp = distanceSq(thumbTip, indexMcp);
+  const dThumbIpIndexMcp = distanceSq(thumbIp, indexMcp);
+  const dThumbTipPinky = distanceSq(thumbTip, pinkyMcp);
+  const dThumbIpPinky = distanceSq(thumbIp, pinkyMcp);
+
+  // 1. Thumb is NOT tucked (Tip further from Pinky than IP)
+  const isNotTucked = dThumbTipPinky > dThumbIpPinky;
+  // 2. Thumb is extending OUT (Tip further from Index MCP than IP)
+  const isExtendedOut = dThumbTipIndexMcp > dThumbIpIndexMcp * 1.2;
+
+  if (isNotTucked && isExtendedOut) {
+      fingersUp++;
+  }
+
+  // --- 4. Fist Detection (Refined) ---
+  // Fist = 0 main fingers extended. (Strict).
+  // We re-verify main fingers with a slightly more lenient threshold for "foldedness" check.
+  let mainFingersExtended = 0;
+  for (const [_, pipIdx, __, tipIdx] of FINGERS_INDICES) {
+      const tip = landmarks[tipIdx];
+      const pip = landmarks[pipIdx];
+      
+      // If Tip is further than PIP (even slightly), it's not fully folded
+      if (distanceSq(tip, wrist) > distanceSq(pip, wrist)) {
+          mainFingersExtended++;
+      }
+  }
+
+  const isFist = mainFingersExtended === 0;
+
+  // Centroid (approximate palm center)
+  const centroid = {
+    x: landmarks[9].x, 
+    y: landmarks[9].y
+  };
+
+  return {
+    id: index,
+    stableId: stableId !== -1 ? stableId : index,
+    landmarks,
+    handedness: handednessLabel,
+    facing,
+    isFist,
+    fingerCount: fingersUp,
+    centroid
+  };
+};
+
+export const getSortedHands = (hands: DetectedHand[]) => {
+  return [...hands].sort((a, b) => a.centroid.x - b.centroid.x);
+};
 
