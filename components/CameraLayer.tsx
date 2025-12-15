@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } f
 import { analyzeHand, getSortedHands } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
 import { COLORS } from '../constants';
-import { AlertTriangle, Loader2, RefreshCcw } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCcw, Camera } from 'lucide-react';
 
 interface Results {
   multiHandLandmarks: HandLandmark[][];
@@ -40,6 +40,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // UI States
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
+  const [isStreamReady, setIsStreamReady] = useState<boolean>(false);
   
   // Camera State - Default to 'environment' for wide angle preference on mobile
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
@@ -66,6 +67,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
   const toggleCamera = () => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
+    setIsStreamReady(false); // Reset stream ready state on toggle
   };
 
   useImperativeHandle(ref, () => ({
@@ -97,18 +99,52 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
           stream.getTracks().forEach(t => t.stop());
         }
         
-        const stream = await navigator.mediaDevices.getUserMedia({
+        // Initial request to get permissions and default camera
+        let stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: facingMode
           },
           audio: false
         });
+
+        // Optimization: Automatic switch to Ultra Wide camera if available and we are in environment mode
+        if (facingMode === 'environment') {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                
+                // Look for back facing cameras with "ultra", "0.5", or "wide" in label
+                const ultraWide = videoDevices.find(d => 
+                    /back/i.test(d.label) && (/ultra/i.test(d.label) || /0\.5/i.test(d.label))
+                );
+                
+                if (ultraWide) {
+                    stream.getTracks().forEach(t => t.stop());
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { deviceId: { exact: ultraWide.deviceId } },
+                        audio: false
+                    });
+                }
+            } catch (switchErr) {
+                console.warn("Failed to switch to ultra-wide camera, staying on default:", switchErr);
+                if (stream.active === false || stream.getTracks().every(t => t.readyState === 'ended')) {
+                     stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'environment' },
+                        audio: false
+                    });
+                }
+            }
+        }
         
         video.srcObject = stream;
         
         video.onloadedmetadata = () => {
            video.play()
+             .then(() => {
+                if (!isCancelled) setIsStreamReady(true);
+             })
              .catch(e => {
+                console.error("Play error", e);
                 setErrorMessage("화면을 터치하여 카메라를 시작해주세요.");
              });
         };
@@ -312,17 +348,18 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
+      {/* Error Overlay */}
       {errorMessage && (
-        <div className="absolute inset-0 flex items-center justify-center z-50 bg-black/90 p-6 text-center">
-           <div className="flex flex-col items-center gap-4">
-              <AlertTriangle className="w-12 h-12 text-red-500" />
-              <p className="text-white text-lg font-bold">오류가 발생했습니다</p>
-              <div className="bg-gray-800 p-4 rounded text-left w-full overflow-auto max-h-40">
-                <p className="text-red-300 font-mono text-xs">{errorMessage}</p>
+        <div className="absolute inset-0 flex items-center justify-center z-50 bg-black p-6 text-center animate-fade-in">
+           <div className="flex flex-col items-center gap-4 max-w-sm">
+              <div className="bg-red-500/10 p-4 rounded-full border border-red-500/20">
+                 <AlertTriangle className="w-8 h-8 text-red-500" />
               </div>
+              <h2 className="text-white text-xl font-bold">오류가 발생했습니다</h2>
+              <p className="text-gray-400 text-sm leading-relaxed mb-2">{errorMessage}</p>
               <button 
                 onClick={() => window.location.reload()}
-                className="mt-4 px-6 py-2 bg-white text-black font-bold rounded-full flex items-center gap-2"
+                className="px-6 py-3 bg-white text-black font-bold rounded-xl flex items-center gap-2 hover:bg-gray-100 transition-colors"
               >
                 <RefreshCcw className="w-4 h-4" /> 다시 시도
               </button>
@@ -330,10 +367,29 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         </div>
       )}
 
-      {isLoadingModel && !errorMessage && (
-        <div className="absolute top-4 left-4 z-40 bg-black/60 backdrop-blur px-4 py-2 rounded-full flex items-center gap-3 border border-white/20">
-           <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
-           <span className="text-white text-sm font-bold">AI 모델 준비 중...</span>
+      {/* Initial Loading / Permission Overlay */}
+      {(!isStreamReady || isLoadingModel) && !errorMessage && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black p-6 animate-fade-in text-center">
+            <div className="relative mb-8">
+               <div className="absolute inset-0 bg-yellow-400/20 rounded-full animate-ping blur-xl"></div>
+               <div className="relative bg-gray-900 p-6 rounded-full border border-yellow-400/30 shadow-[0_0_30px_rgba(250,204,21,0.2)]">
+                  {isLoadingModel && isStreamReady ? (
+                     <Loader2 className="w-10 h-10 text-yellow-400 animate-spin" />
+                  ) : (
+                     <Camera className="w-10 h-10 text-yellow-400" />
+                  )}
+               </div>
+            </div>
+            
+            <h2 className="text-2xl font-bold text-white mb-3">
+               {isStreamReady ? "AI 모델 준비 중..." : "카메라 권한 필요"}
+            </h2>
+            
+            <p className="text-gray-400 text-sm leading-relaxed max-w-xs mx-auto">
+               {isStreamReady 
+                  ? "잠시만 기다려주세요." 
+                  : "원활한 게임 진행을 위해\n카메라 접근 권한을 허용해주세요."}
+            </p>
         </div>
       )}
 
