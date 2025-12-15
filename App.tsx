@@ -236,9 +236,8 @@ const App: React.FC = () => {
 
         updateTimerWithGracePeriod(condition, 3000, () => {
              changeState(GameState.DRAWING);
-             setTimeout(() => {
-                performDraw();
-             }, 1000);
+             // Removed extra 1000ms delay to make it feel exactly 3 seconds
+             performDraw();
         });
         break;
       }
@@ -314,78 +313,59 @@ const App: React.FC = () => {
         />
 
         {isGalleryOpen && (
-          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in p-8">
-            <h2 className="text-4xl font-black text-white mb-6 drop-shadow-lg flex items-center gap-3">
-              🎉 당첨 결과 갤러리 🎉
-            </h2>
-            <div className={`w-full max-w-6xl max-h-[70vh] overflow-y-auto grid gap-4 p-4 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
+            <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
                {galleryImages.map((src, idx) => (
                  <div 
                     key={idx} 
-                    className="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-yellow-400 aspect-video group"
+                    className="relative aspect-video group cursor-pointer"
+                    onClick={() => setSelectedImage(src)}
                  >
                     <img 
                       src={src} 
                       alt={`Winner Moment ${idx + 1}`} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 cursor-zoom-in" 
-                      onClick={() => setSelectedImage(src)}
+                      className="w-full h-full object-cover transition-opacity hover:opacity-90" 
                     />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-                        <button 
-                           onClick={() => setSelectedImage(src)}
-                           className="p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur text-white transition-transform hover:scale-110"
-                        >
-                           <ZoomIn className="w-8 h-8" />
-                        </button>
-                        <button 
-                           onClick={() => downloadImage(src, idx)}
-                           className="p-3 bg-white/20 hover:bg-white/40 rounded-full backdrop-blur text-white transition-transform hover:scale-110"
-                        >
-                           <Download className="w-8 h-8" />
-                        </button>
-                    </div>
-                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex justify-between items-end">
-                       <span className="text-white font-bold">순간 포착 #{idx + 1}</span>
+                    <div className="absolute bottom-2 right-2 bg-black/50 px-2 py-0.5 text-white text-xs font-mono">
+                       #{idx + 1}
                     </div>
                  </div>
                ))}
                {galleryImages.length === 0 && (
-                  <div className="col-span-full text-white/50 text-center py-20 text-xl">
+                  <div className="col-span-full text-white/50 text-center py-20 text-lg">
                      아직 포착된 당첨 순간이 없습니다.
                   </div>
                )}
             </div>
-            <div className="mt-8 flex flex-col items-center gap-4">
-               <div className="flex gap-4">
+            <div className="mt-8 w-full max-w-xs flex flex-col gap-3">
                  <button 
                    onClick={handleReset}
-                   className="flex items-center gap-2 px-8 py-4 bg-yellow-400 hover:bg-yellow-500 text-black text-xl font-bold rounded-full shadow-xl transition-all hover:shadow-2xl active:scale-95"
+                   className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-black text-lg font-bold rounded-xl shadow-lg active:scale-95 whitespace-nowrap"
                  >
-                   <RefreshCw className="w-6 h-6" /> 다시 시작하기
+                   <RefreshCw className="w-5 h-5" /> 다시 시작하기
                  </button>
                  <button 
                    onClick={() => setIsGalleryOpen(false)}
-                   className="flex items-center gap-2 px-6 py-4 bg-white/20 hover:bg-white/30 text-white font-bold rounded-full backdrop-blur-md transition-colors"
+                   className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white/20 hover:bg-white/30 text-white font-bold rounded-xl backdrop-blur-md transition-colors whitespace-nowrap"
                  >
-                   <X className="w-6 h-6" /> 닫기
+                   <X className="w-5 h-5" /> 닫기
                  </button>
-               </div>
             </div>
           </div>
         )}
 
         {selectedImage && (
            <div 
-             className="absolute inset-0 z-50 bg-black/95 flex items-center justify-center p-4 animate-fade-in"
+             className="absolute inset-0 z-50 bg-black flex items-center justify-center animate-fade-in"
              onClick={() => setSelectedImage(null)}
            >
-              <div className="relative max-w-full max-h-full">
+              <div className="relative w-full h-full flex items-center justify-center p-4">
                  <img 
                    src={selectedImage} 
                    alt="Full Screen" 
-                   className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-gray-800"
+                   className="max-w-full max-h-full object-contain"
                  />
-                 <div className="absolute top-4 right-4 flex gap-2">
+                 <div className="absolute top-4 right-4 flex gap-3">
                      <button 
                        className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
                        onClick={(e) => {
