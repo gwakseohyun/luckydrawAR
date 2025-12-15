@@ -330,7 +330,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="w-screen h-[100dvh] bg-gray-100 flex items-center justify-center relative">
+    <div className="fixed inset-0 w-full h-full bg-gray-100 flex items-center justify-center overflow-hidden">
       <div className="relative w-full h-full max-w-[1920px] max-h-[1080px] bg-black shadow-2xl overflow-hidden">
         
         <CameraLayer 
@@ -363,7 +363,6 @@ const App: React.FC = () => {
           onUpdateWinnerCount={updateWinnerCount}
         />
 
-        {/* ... (Modal code remains unchanged) ... */}
         {isGalleryOpen && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
             <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
