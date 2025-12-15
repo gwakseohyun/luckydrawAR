@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -29,14 +30,17 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // Tracking Configuration
-const MAX_TRACKING_DISTANCE = 0.3; // Increased to handle faster motion
-const FRAME_PERSISTENCE_THRESHOLD = 3; // Reduced slightly for faster response
-const MAX_MISSING_FRAMES = 15; // Increased persistence to hold ID longer during glitches
+const MAX_TRACKING_DISTANCE = 0.3; 
+const FRAME_PERSISTENCE_THRESHOLD = 3; 
+const MAX_MISSING_FRAMES = 15; 
+// New: Minimum distance between two distinct detected inputs to be considered separate hands.
+// If two detections are closer than this (e.g. 10% of screen), we assume it's motion blur/ghosting.
+const MIN_SPATIAL_SEPARATION = 0.1; 
 
 // Visual Stabilization Config
-const POS_SMOOTHING_FACTOR = 0.3; // Lower = smoother but more lag
-const FIST_CONFIDENCE_THRESHOLD = 0.6; // Threshold to switch state
-const FIST_CONFIDENCE_DECAY = 0.2; // How fast state changes
+const POS_SMOOTHING_FACTOR = 0.3; 
+const FIST_CONFIDENCE_THRESHOLD = 0.6; 
+const FIST_CONFIDENCE_DECAY = 0.2; 
 
 let nextStableId = 0;
 
@@ -328,26 +332,40 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
              const now = Date.now();
              
-             // --- Improved Tracking Logic (Hungarian-like Greedy Matching) ---
+             // --- Improved Tracking Logic ---
              
-             // 1. Prepare inputs
-             const inputCentroids: {x: number, y: number, index: number}[] = [];
+             // 1. Prepare inputs & SPATIAL DE-DUPLICATION (Fix for Motion Blur)
+             const rawInputs: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks, i) => {
-                   inputCentroids.push({x: landmarks[9].x, y: landmarks[9].y, index: i});
+                   rawInputs.push({x: landmarks[9].x, y: landmarks[9].y, index: i});
                 });
              }
+
+             // De-duplicate: If two inputs are very close, keep only one.
+             // This prevents a single hand from being detected as two hands due to ghosting.
+             const uniqueInputs: typeof rawInputs = [];
+             rawInputs.forEach(input => {
+                const isGhost = uniqueInputs.some(existing => {
+                   const dist = Math.sqrt(Math.pow(existing.x - input.x, 2) + Math.pow(existing.y - input.y, 2));
+                   return dist < MIN_SPATIAL_SEPARATION;
+                });
+                
+                if (!isGhost) {
+                   uniqueInputs.push(input);
+                }
+             });
 
              const activeTracks = tracksRef.current;
              
              // Increment missing count for all tracks first
              activeTracks.forEach(t => t.missingCount++);
 
-             // 2. Calculate all possible distances
+             // 2. Calculate all possible distances (Greedy Matching)
              const matches: {trackIdx: number, inputIdx: number, dist: number}[] = [];
              
              activeTracks.forEach((track, trackIdx) => {
-                 inputCentroids.forEach((input, inputIdx) => {
+                 uniqueInputs.forEach((input, inputIdx) => {
                      const dist = Math.sqrt(Math.pow(track.centroid.x - input.x, 2) + Math.pow(track.centroid.y - input.y, 2));
                      if (dist < MAX_TRACKING_DISTANCE) {
                          matches.push({trackIdx, inputIdx, dist});
@@ -355,7 +373,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  });
              });
 
-             // 3. Sort matches by distance (ascending) to assign best fits first
+             // 3. Sort matches by distance (ascending)
              matches.sort((a, b) => a.dist - b.dist);
 
              // 4. Assign matches
@@ -367,7 +385,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  
                  // Match found
                  const track = activeTracks[trackIdx];
-                 const input = inputCentroids[inputIdx];
+                 const input = uniqueInputs[inputIdx];
                  
                  track.centroid.x = input.x;
                  track.centroid.y = input.y;
@@ -382,7 +400,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              });
 
              // 5. Create new tracks for unmatched inputs
-             inputCentroids.forEach((input, idx) => {
+             uniqueInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
                      activeTracks.push({
                          id: nextStableId++,
@@ -403,7 +421,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              const finalHands: DetectedHand[] = [];
              
              validTracks.forEach(track => {
-                 // Persistence check: wait until confirmed for a few frames to avoid ghost hands
                  if (track.frameCount >= FRAME_PERSISTENCE_THRESHOLD && track.missingCount === 0) {
                      const mpIndex = (track as any)._tempMpIndex;
                      if (mpIndex !== undefined && results.multiHandLandmarks[mpIndex]) {
