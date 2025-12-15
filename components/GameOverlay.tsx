@@ -2,7 +2,7 @@
 import React, { useState, memo } from 'react';
 import { GameState } from '../types';
 import { INSTRUCTIONS, COLORS } from '../constants';
-import { RefreshCw, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play } from 'lucide-react';
+import { RefreshCw, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play, Minus, Plus } from 'lucide-react';
 
 interface GameOverlayProps {
   gameState: GameState;
@@ -19,6 +19,7 @@ interface GameOverlayProps {
   zoomCapabilities?: { min: number, max: number, step: number } | null;
   currentZoom?: number;
   onZoomChange?: (value: number) => void;
+  onUpdateWinnerCount?: (delta: number) => void;
 }
 
 const GameOverlay: React.FC<GameOverlayProps> = memo(({
@@ -35,15 +36,12 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
   onToggleCamera,
   zoomCapabilities,
   currentZoom = 1,
-  onZoomChange
+  onZoomChange,
+  onUpdateWinnerCount
 }) => {
   const [isInstructionExpanded, setIsInstructionExpanded] = useState(true);
 
-  const isHolding = 
-    gameState === GameState.SET_WINNER_COUNT || 
-    gameState === GameState.WAIT_FOR_FISTS_READY ||
-    gameState === GameState.WAIT_FOR_FISTS_PRE_DRAW;
-
+  const isHolding = gameState === GameState.WAIT_FOR_FISTS_READY;
   const isDetecting = gameState === GameState.DETECT_PARTICIPANTS;
 
   const CIRCUMFERENCE = 377;
@@ -103,11 +101,33 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
       <div className="flex-1 flex flex-col items-center justify-start pt-32 pointer-events-none relative pb-20">
         
         {isDetecting && (
-          <div className="flex flex-col items-center gap-2">
-             <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter leading-none">
-               {participantCount}명
-             </span>
-             <span className="text-2xl text-white font-bold drop-shadow-md mt-2">감지됨</span>
+          <div className="flex flex-col items-center gap-6">
+             <div className="flex flex-col items-center gap-2">
+                <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter leading-none">
+                  {participantCount}명
+                </span>
+                <span className="text-2xl text-white font-bold drop-shadow-md mt-2">감지됨</span>
+             </div>
+
+             {/* Winner Count Selector */}
+             <div className="pointer-events-auto bg-black/60 backdrop-blur-md rounded-2xl p-3 border border-white/10 shadow-xl flex flex-col items-center gap-2">
+                <span className="text-xs text-white/70 font-bold uppercase tracking-wider">당첨 인원</span>
+                <div className="flex items-center gap-4">
+                   <button 
+                      onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(-1)}
+                      className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/10 transition-all active:scale-95"
+                   >
+                      <Minus className="w-5 h-5" />
+                   </button>
+                   <span className="text-3xl font-black text-white w-12 text-center">{winnerCount}</span>
+                   <button 
+                      onClick={() => onUpdateWinnerCount && onUpdateWinnerCount(1)}
+                      className="w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-300 text-black flex items-center justify-center shadow-[0_0_10px_rgba(250,204,21,0.4)] transition-all active:scale-95"
+                   >
+                      <Plus className="w-5 h-5" />
+                   </button>
+                </div>
+             </div>
           </div>
         )}
 
@@ -130,15 +150,6 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                <span className="text-7xl font-black text-white drop-shadow-lg z-10">
                  {displayTime}
                </span>
-             </div>
-           </div>
-        )}
-        
-        {gameState === GameState.SET_WINNER_COUNT && winnerCount > 0 && !warningMessage && (
-           <div className="mt-8 flex flex-col items-center gap-1">
-             <div className="bg-black/60 backdrop-blur px-5 py-2 rounded-full border border-yellow-400/30">
-               <span className="text-yellow-400 font-bold text-2xl">{winnerCount}명</span>
-               <span className="text-white text-lg ml-2">추첨 예정</span>
              </div>
            </div>
         )}
