@@ -33,6 +33,10 @@ const App: React.FC = () => {
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null); 
 
+  // Zoom Logic
+  const [zoomCaps, setZoomCaps] = useState<{min: number, max: number, step: number} | null>(null);
+  const [currentZoom, setCurrentZoom] = useState<number>(1);
+
   // Gesture Tracking Refs
   const handGestureStates = useRef<Map<number, GestureState>>(new Map());
   
@@ -108,6 +112,18 @@ const App: React.FC = () => {
        cameraLayerRef.current.toggleCamera();
     }
   }, []);
+
+  const handleZoomInit = useCallback((min: number, max: number, step: number, current: number) => {
+    setZoomCaps({min, max, step});
+    setCurrentZoom(current);
+  }, []);
+
+  const handleZoomChange = (val: number) => {
+    setCurrentZoom(val);
+    if (cameraLayerRef.current) {
+        cameraLayerRef.current.setZoom(val);
+    }
+  };
 
   // Central Game Loop
   useEffect(() => {
@@ -325,6 +341,7 @@ const App: React.FC = () => {
           winningHandIndices={winningHandIndices}
           triggerCapture={shouldCapture}
           onCaptureComplete={handleCaptureComplete}
+          onZoomInit={handleZoomInit}
         />
         
         <GameOverlay 
@@ -339,6 +356,9 @@ const App: React.FC = () => {
           onOpenGallery={() => setIsGalleryOpen(true)}
           galleryCount={galleryImages.length}
           onToggleCamera={handleToggleCamera}
+          zoomCapabilities={zoomCaps}
+          currentZoom={currentZoom}
+          onZoomChange={handleZoomChange}
         />
 
         {isGalleryOpen && (
