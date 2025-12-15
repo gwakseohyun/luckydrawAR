@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } f
 import { analyzeHand, getSortedHands } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
 import { COLORS } from '../constants';
-import { AlertTriangle, Loader2, RefreshCcw, Camera } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCcw, Camera, Play } from 'lucide-react';
 
 interface Results {
   multiHandLandmarks: HandLandmark[][];
@@ -41,6 +41,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoadingModel, setIsLoadingModel] = useState<boolean>(true);
   const [isStreamReady, setIsStreamReady] = useState<boolean>(false);
+  const [userConfirmed, setUserConfirmed] = useState<boolean>(false); // New state for soft permission
   
   // Camera State - Default to 'environment' for wide angle preference on mobile
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
@@ -67,7 +68,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
   const toggleCamera = () => {
     setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
-    setIsStreamReady(false); // Reset stream ready state on toggle
+    setIsStreamReady(false); 
   };
 
   useImperativeHandle(ref, () => ({
@@ -75,6 +76,9 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   }));
 
   useEffect(() => {
+    // Prevent initialization until user interacts
+    if (!userConfirmed) return;
+
     let isCancelled = false;
 
     const initSystem = async () => {
@@ -344,7 +348,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
          stream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [facingMode]);
+  }, [facingMode, userConfirmed]);
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
@@ -367,29 +371,54 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         </div>
       )}
 
-      {/* Initial Loading / Permission Overlay */}
+      {/* Initial Permission / Loading Overlay */}
       {(!isStreamReady || isLoadingModel) && !errorMessage && (
-        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black p-6 animate-fade-in text-center">
-            <div className="relative mb-8">
-               <div className="absolute inset-0 bg-yellow-400/20 rounded-full animate-ping blur-xl"></div>
-               <div className="relative bg-gray-900 p-6 rounded-full border border-yellow-400/30 shadow-[0_0_30px_rgba(250,204,21,0.2)]">
-                  {isLoadingModel && isStreamReady ? (
-                     <Loader2 className="w-10 h-10 text-yellow-400 animate-spin" />
-                  ) : (
-                     <Camera className="w-10 h-10 text-yellow-400" />
-                  )}
-               </div>
-            </div>
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black p-6 animate-fade-in text-center safe-area-inset">
             
-            <h2 className="text-2xl font-bold text-white mb-3">
-               {isStreamReady ? "AI 모델 준비 중..." : "카메라 권한 필요"}
-            </h2>
-            
-            <p className="text-gray-400 text-sm leading-relaxed max-w-xs mx-auto">
-               {isStreamReady 
-                  ? "잠시만 기다려주세요." 
-                  : "원활한 게임 진행을 위해\n카메라 접근 권한을 허용해주세요."}
-            </p>
+            {!userConfirmed ? (
+                /* 1. First Step: Custom Permission Primer */
+                <>
+                    <div className="relative mb-8">
+                       <div className="absolute inset-0 bg-yellow-400/20 rounded-full animate-ping blur-xl"></div>
+                       <div className="relative bg-gray-900 p-8 rounded-full border border-yellow-400/30 shadow-[0_0_30px_rgba(250,204,21,0.2)]">
+                           <Camera className="w-12 h-12 text-yellow-400" />
+                       </div>
+                    </div>
+                    
+                    <h2 className="text-2xl font-bold text-white mb-3">
+                       카메라 사용 안내
+                    </h2>
+                    
+                    <p className="text-gray-400 text-sm leading-relaxed max-w-xs mx-auto mb-8">
+                       게임 진행을 위해 카메라 권한이 필요합니다.<br/>
+                       아래 버튼을 누른 후 팝업에서 <span className="text-yellow-400 font-bold">'허용'</span>을 선택해주세요.
+                    </p>
+
+                    <button 
+                        onClick={() => setUserConfirmed(true)}
+                        className="group relative flex items-center justify-center gap-3 px-8 py-4 bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg rounded-2xl shadow-[0_0_20px_rgba(250,204,21,0.4)] transition-all active:scale-95 w-full max-w-xs"
+                    >
+                        <Play className="w-5 h-5 fill-black" />
+                        시작하기
+                    </button>
+                </>
+            ) : (
+                /* 2. Second Step: Loading State (Waiting for System Prompt or Model) */
+                <>
+                     <div className="relative mb-8">
+                        <div className="absolute inset-0 bg-yellow-400/10 rounded-full blur-xl"></div>
+                        <div className="relative bg-gray-900 p-6 rounded-full border border-white/10">
+                            <Loader2 className="w-10 h-10 text-yellow-400 animate-spin" />
+                        </div>
+                     </div>
+                     <h2 className="text-xl font-bold text-white mb-2">
+                        {isStreamReady ? "AI 모델 로딩 중..." : "카메라 연결 중..."}
+                     </h2>
+                     <p className="text-gray-500 text-xs">
+                        잠시만 기다려주세요
+                     </p>
+                </>
+            )}
         </div>
       )}
 
