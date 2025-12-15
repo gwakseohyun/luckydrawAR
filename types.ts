@@ -1,12 +1,10 @@
 
 export enum GameState {
   IDLE = 'IDLE', // Waiting for camera
-  DETECT_PARTICIPANTS = 'DETECT_PARTICIPANTS', // Step 1: Count hands
-  WAIT_FOR_FISTS_READY = 'WAIT_FOR_FISTS_READY', // Step 2: Everyone make a fist
-  SET_WINNER_COUNT = 'SET_WINNER_COUNT', // Step 3: Show fingers to set winner count
-  WAIT_FOR_FISTS_PRE_DRAW = 'WAIT_FOR_FISTS_PRE_DRAW', // Step 4: Ready for draw
-  DRAWING = 'DRAWING', // Step 5: Randomizing
-  SHOW_WINNER = 'SHOW_WINNER', // Step 6: Reveal winner
+  DETECT_PARTICIPANTS = 'DETECT_PARTICIPANTS', // Step 1: Count hands & Set Winner Count
+  WAIT_FOR_FISTS_READY = 'WAIT_FOR_FISTS_READY', // Step 2: Everyone make a fist (Ready to Draw)
+  DRAWING = 'DRAWING', // Step 3: Randomizing
+  SHOW_WINNER = 'SHOW_WINNER', // Step 4: Reveal winner
 }
 
 export interface HandLandmark {
