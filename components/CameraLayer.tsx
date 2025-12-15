@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand, getSortedHands } from '../services/handLogic';
-import { DetectedHand, GameState, HandLandmark } from '../types';
+import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
 import { COLORS } from '../constants';
-import { AlertTriangle, Loader2, Bug, Video, Lock, RefreshCcw, SwitchCamera } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCcw } from 'lucide-react';
 
 interface Results {
   multiHandLandmarks: HandLandmark[][];
@@ -27,13 +27,13 @@ const lerp = (start: number, end: number, t: number) => {
   return start * (1 - t) + end * t;
 };
 
-const CameraLayer: React.FC<CameraLayerProps> = ({ 
+const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
   gameState, 
   onHandsUpdate, 
   winningHandIndices,
   triggerCapture,
   onCaptureComplete
-}) => {
+}, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -75,6 +75,10 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
     addLog("카메라 전환 중...");
   };
 
+  useImperativeHandle(ref, () => ({
+    toggleCamera
+  }));
+
   useEffect(() => {
     let isCancelled = false;
 
@@ -92,7 +96,7 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
       // 1. Camera Setup
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-           throw new Error("브라우저가 카메라 접근을 지원하지 않습니다. (HTTPS 확인 필요)");
+           // Skip strict check for simpler mobile compatibility, rely on catch
         }
 
         // Stop existing tracks if any
@@ -218,7 +222,7 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
       addLog("렌더링 루프 시작");
 
       // 3. AI Model Setup
-      if (!handsRef.current) { // Only init if not already exists to save time on cam switch
+      if (!handsRef.current) { 
           if (!window.Hands) {
              addLog("MediaPipe 스크립트 대기 중...");
              let attempts = 0;
@@ -261,16 +265,6 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
                    rawHands.push(analyzeHand(landmarks, index, label));
                 });
              }
-
-             // Sort logic depends on mirroring
-             // If mirrored (user), left-to-right on screen is small x to large x.
-             // But raw landmarks x is normalized 0..1. 0 is left.
-             // If mirrored, 0 on raw image is drawn at right. 
-             // We want to sort visually left to right.
-             // If user facing (mirrored): X=1 is Left of screen, X=0 is Right.
-             // So sort by descending X.
-             // If env facing (normal): X=0 is Left, X=1 is Right.
-             // So sort by ascending X.
              
              let sorted = [...rawHands];
              if (facingMode === 'user') {
@@ -327,18 +321,15 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
       isCancelled = true;
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       if (detectReqRef.current) cancelAnimationFrame(detectReqRef.current);
-      // Do NOT close handsRef here to keep model loaded when just switching camera
-      // But we DO stop video tracks
       if (videoRef.current && videoRef.current.srcObject) {
          const stream = videoRef.current.srcObject as MediaStream;
          stream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [facingMode]); // Re-run when facingMode changes
+  }, [facingMode]);
 
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
-      {/* Error / Status Display */}
       {errorMessage && (
         <div className="absolute inset-0 flex items-center justify-center z-50 bg-black/90 p-6 text-center">
            <div className="flex flex-col items-center gap-4">
@@ -357,26 +348,13 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
         </div>
       )}
 
-      {/* Model Loading Indicator */}
       {isLoadingModel && !errorMessage && (
         <div className="absolute top-4 left-4 z-40 bg-black/60 backdrop-blur px-4 py-2 rounded-full flex items-center gap-3 border border-white/20">
            <Loader2 className="w-5 h-5 text-yellow-400 animate-spin" />
            <span className="text-white text-sm font-bold">AI 모델 준비 중...</span>
         </div>
       )}
-      
-      {/* Camera Toggle Button */}
-      {!errorMessage && (
-        <button 
-          onClick={toggleCamera}
-          className="absolute top-4 right-4 z-50 p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md rounded-full text-white border border-white/30 transition-all active:scale-95 shadow-lg"
-          aria-label="카메라 전환"
-        >
-          <SwitchCamera className="w-6 h-6" />
-        </button>
-      )}
 
-      {/* Debug Logs (Semi-transparent) */}
       <div className="absolute bottom-4 left-4 z-50 pointer-events-none opacity-40 hover:opacity-100 transition-opacity">
         <div className="bg-black/70 p-2 rounded text-[10px] text-green-400 font-mono max-w-[200px] overflow-hidden">
            {debugLogs.map((log, i) => (
@@ -399,17 +377,11 @@ const CameraLayer: React.FC<CameraLayerProps> = ({
       />
     </div>
   );
-};
+});
 
-function drawHandOverlay(
-  ctx: CanvasRenderingContext2D, 
-  x: number, 
-  y: number, 
-  hand: DetectedHand, 
-  state: GameState, 
-  sortedIndex: number,
-  isWinner: boolean
-) {
+export default CameraLayer;
+
+function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, hand: DetectedHand, state: GameState, sortedIndex: number, isWinner: boolean) {
   const size = 100;
   ctx.lineWidth = 4;
   
@@ -425,7 +397,6 @@ function drawHandOverlay(
       const color = hand.isFist ? COLORS.success : COLORS.accent;
       ctx.strokeStyle = color;
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, 15);
-      
       if (!hand.isFist) {
         drawLabel(ctx, x, y + size/2 + 20, "주먹 쥐세요", COLORS.accent);
       }
@@ -438,7 +409,6 @@ function drawHandOverlay(
 
 function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number) {
   const radius = 40; 
-  
   const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 1.5);
   gradient.addColorStop(0, 'rgba(255, 234, 0, 0.9)');
   gradient.addColorStop(1, 'rgba(255, 234, 0, 0)');
@@ -446,16 +416,13 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number) {
   ctx.beginPath();
   ctx.arc(x, y, radius * 1.5, 0, 2 * Math.PI);
   ctx.fill();
-
   ctx.fillStyle = COLORS.primary;
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, 2 * Math.PI);
   ctx.fill();
-  
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = 3;
   ctx.stroke();
-
   ctx.fillStyle = '#000000';
   ctx.font = '900 16px Pretendard';
   ctx.textAlign = 'center';
@@ -482,16 +449,12 @@ function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
   const padding = 10;
   const bgW = metrics.width + padding * 2;
   const bgH = 30;
-
   ctx.fillStyle = bgColor;
   ctx.beginPath();
   ctx.roundRect(x - bgW / 2, y - bgH / 2, bgW, bgH, 8);
   ctx.fill();
-
   ctx.fillStyle = '#000000';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y);
 }
-
-export default CameraLayer;
