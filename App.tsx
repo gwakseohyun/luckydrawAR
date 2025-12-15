@@ -183,6 +183,9 @@ const App: React.FC = () => {
       if (gameState === GameState.DETECT_PARTICIPANTS) {
         setParticipantCount(0);
       }
+      if (gameState === GameState.WAIT_FOR_FISTS_READY || gameState === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
+         setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
+      }
     }
 
     switch (gameState) {
@@ -195,7 +198,22 @@ const App: React.FC = () => {
       case GameState.WAIT_FOR_FISTS_READY: {
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
-        const condition = total > 0 && (fistCount / total) >= 0.8;
+        
+        // Check 1: Are all participants on screen?
+        const isAllParticipantsVisible = total >= participantCount;
+        
+        // Check 2: Are all of them making a fist?
+        const isAllFists = fistCount >= participantCount;
+        
+        const condition = isAllParticipantsVisible && isAllFists;
+
+        if (!isAllParticipantsVisible) {
+           setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
+        } else if (!isAllFists) {
+           setWarningMessage("모두 주먹을 쥐어주세요.");
+        } else {
+           setWarningMessage(null);
+        }
 
         updateTimerWithGracePeriod(condition, 3000, () => {
            changeState(GameState.SET_WINNER_COUNT);
@@ -232,11 +250,22 @@ const App: React.FC = () => {
       case GameState.WAIT_FOR_FISTS_PRE_DRAW: {
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
-        const condition = total > 0 && (fistCount / total) >= 0.8;
+        
+        const isAllParticipantsVisible = total >= participantCount;
+        const isAllFists = fistCount >= participantCount;
+        
+        const condition = isAllParticipantsVisible && isAllFists;
+
+        if (!isAllParticipantsVisible) {
+           setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
+        } else if (!isAllFists) {
+           setWarningMessage("모두 주먹을 쥐어주세요.");
+        } else {
+           setWarningMessage(null);
+        }
 
         updateTimerWithGracePeriod(condition, 3000, () => {
              changeState(GameState.DRAWING);
-             // Removed extra 1000ms delay to make it feel exactly 3 seconds
              performDraw();
         });
         break;
