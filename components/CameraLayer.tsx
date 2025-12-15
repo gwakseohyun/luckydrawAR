@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -12,7 +13,7 @@ interface Results {
 interface CameraLayerProps {
   gameState: GameState;
   onHandsUpdate: (hands: DetectedHand[]) => void;
-  winningHandIndices: number[]; // Now interpreted as Stable IDs in some contexts, but mostly visual indices
+  winningStableIds: number[]; // CHANGED: Now using Stable IDs to lock the winner to a specific hand
   triggerCapture: boolean;
   onCaptureComplete: (images: string[]) => void;
   onZoomInit?: (min: number, max: number, step: number, current: number) => void;
@@ -28,14 +29,17 @@ const lerp = (start: number, end: number, t: number) => {
   return start * (1 - t) + end * t;
 };
 
-// Tracking helper to maintain IDs across frames based on proximity
-const MAX_TRACKING_DISTANCE = 0.2; // 20% of screen width movement allowed per frame
+// Tracking Configuration
+const MAX_TRACKING_DISTANCE = 0.25; // Increased slightly to track fast movements better
+const FRAME_PERSISTENCE_THRESHOLD = 5; // Hand must be detected for 5 frames to be valid (Debounce)
+const MAX_MISSING_FRAMES = 10; // Keep ID alive for 10 frames if lost (Anti-flicker)
+
 let nextStableId = 0;
 
 const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
   gameState, 
   onHandsUpdate, 
-  winningHandIndices,
+  winningStableIds, 
   triggerCapture,
   onCaptureComplete,
   onZoomInit
@@ -58,12 +62,22 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
   // Logic Refs
   const gameStateRef = useRef(gameState);
-  const winningIndicesRef = useRef(winningHandIndices);
+  const winningIdsRef = useRef(winningStableIds);
   const triggerCaptureRef = useRef(triggerCapture);
   
   // Data Refs
   const detectedHandsRef = useRef<DetectedHand[]>([]);
-  const prevFrameHandsRef = useRef<{id: number, centroid: {x: number, y: number}, lastSeen: number}[]>([]);
+  
+  // Robust Tracking Refs
+  // Stores history of tracks: { id, centroid, lastSeenTime, frameCount, missingCount }
+  const tracksRef = useRef<{
+      id: number;
+      centroid: {x: number, y: number};
+      lastSeen: number;
+      frameCount: number; // How many consecutive frames seen
+      missingCount: number; // How many frames missing since last seen
+  }[]>([]);
+
   const visualSmoothMapRef = useRef<Map<number, {x: number, y: number}>>(new Map());
   
   // Loop Control Refs
@@ -73,7 +87,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const isDetectingRef = useRef<boolean>(false);
 
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
-  useEffect(() => { winningIndicesRef.current = winningHandIndices; }, [winningHandIndices]);
+  useEffect(() => { winningIdsRef.current = winningStableIds; }, [winningStableIds]);
   useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
 
   useImperativeHandle(ref, () => ({
@@ -86,14 +100,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
        if (zoomStateRef.current.type === 'native' && videoTrackRef.current) {
           const track = videoTrackRef.current;
-          // Apply native constraint
           track.applyConstraints({
               advanced: [{ zoom: zoom }] as any
           }).catch(e => {
               console.debug("Native zoom apply failed", e);
           });
        }
-       // Digital zoom is handled in the render loop via zoomStateRef.current.current
     }
   }));
 
@@ -119,17 +131,15 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            // Skip strict check
         }
 
-        // Stop existing tracks
         if (video.srcObject) {
           const stream = video.srcObject as MediaStream;
           stream.getTracks().forEach(t => t.stop());
         }
         
-        // Request Stream
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: facingMode,
-            width: { ideal: 1280 }, // Request higher res for better digital zoom quality
+            width: { ideal: 1280 },
             height: { ideal: 720 }
           },
           audio: false
@@ -139,15 +149,10 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         const videoTrack = stream.getVideoTracks()[0];
         videoTrackRef.current = videoTrack;
 
-        // --- Hybrid Zoom Capability Check ---
         const capabilities = videoTrack.getCapabilities ? (videoTrack.getCapabilities() as any) : {};
         
-        // Determine Zoom Type and Force Reset
         if (capabilities.zoom && capabilities.zoom.min !== capabilities.zoom.max) {
-            // Case A: Hardware Zoom Supported
             const minZoom = capabilities.zoom.min;
-            
-            // Force Reset: Attempt to set zoom to minimum immediately to clear any OS caching
             try {
               await videoTrack.applyConstraints({
                  advanced: [{ zoom: minZoom }] as any
@@ -155,22 +160,14 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
             } catch (e) {
               console.debug("Failed to force reset zoom", e);
             }
-            
             const settings = videoTrack.getSettings ? (videoTrack.getSettings() as any) : {};
             const currentZoom = settings.zoom || minZoom;
-
             zoomStateRef.current = { type: 'native', current: currentZoom };
             
             if (onZoomInit) {
-                onZoomInit(
-                    capabilities.zoom.min, 
-                    capabilities.zoom.max, 
-                    capabilities.zoom.step, 
-                    currentZoom
-                );
+                onZoomInit(capabilities.zoom.min, capabilities.zoom.max, capabilities.zoom.step, currentZoom);
             }
         } else {
-            // Case B: Fallback to Digital Zoom (1x to 3x)
             zoomStateRef.current = { type: 'digital', current: 1 };
             if (onZoomInit) {
                 onZoomInit(1, 3, 0.1, 1);
@@ -203,7 +200,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         return;
       }
 
-      // 2. Render Loop (Decoupled - Always Runs)
+      // 2. Render Loop
       const render = () => {
         if (isCancelled) return;
 
@@ -214,43 +211,32 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
            }
 
            const zoom = zoomStateRef.current;
-           
-           // Drawing Logic
            ctx.save();
-           
-           // A. Handle Mirroring
            if (facingMode === 'user') {
              ctx.translate(canvas.width, 0);
              ctx.scale(-1, 1);
            }
 
-           // B. Handle Zoom (Digital vs Native)
            if (zoom.type === 'native') {
-               // Native: Draw full video (Hardware handles zoom)
                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
            } else {
-               // Digital: Crop and Scale
                const z = zoom.current;
-               // Clamp z to be safe
                const safeZ = Math.max(1, z);
-               
                const vw = video.videoWidth;
                const vh = video.videoHeight;
                const cropW = vw / safeZ;
                const cropH = vh / safeZ;
                const cropX = (vw - cropW) / 2;
                const cropY = (vh - cropH) / 2;
-
                ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
            }
-           
            ctx.restore();
         }
 
         // Draw AR Overlays
         const hands = detectedHandsRef.current;
         const currentGameState = gameStateRef.current;
-        const currentWinners = winningIndicesRef.current;
+        const currentWinningIds = winningIdsRef.current;
         const visualSmoothMap = visualSmoothMapRef.current;
 
         if (hands.length > 0) {
@@ -258,7 +244,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
               const targetX = hand.centroid.x * canvas.width;
               const targetY = hand.centroid.y * canvas.height;
 
-              // Smoothing for visual stability
               let prevPos = visualSmoothMap.get(hand.stableId);
               if (!prevPos) prevPos = { x: targetX, y: targetY };
 
@@ -266,14 +251,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
               const smoothY = lerp(prevPos.y, targetY, 0.4);
               visualSmoothMap.set(hand.stableId, { x: smoothX, y: smoothY });
 
-              // Check if this hand's index (in the sorted array) is a winner
-              // Winners are stored as indices of the sorted array for the current game round
-              const isWinner = currentWinners.includes(sortedIndex);
+              // FIX: Determine winner based on Stable ID, not Index
+              const isWinner = currentWinningIds.includes(hand.stableId);
               
               drawHandOverlay(ctx, smoothX, smoothY, hand, currentGameState, sortedIndex, isWinner);
            });
            
-           // Cleanup visual map
            const currentIds = new Set(hands.map(h => h.stableId));
            for (const id of visualSmoothMap.keys()) {
               if (!currentIds.has(id)) {
@@ -299,7 +282,6 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
         renderReqRef.current = requestAnimationFrame(render);
       };
       
-      // Cancel previous loops if exists
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       renderReqRef.current = requestAnimationFrame(render);
 
@@ -322,88 +304,108 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
           });
 
-          // Increased confidence to reduce ghost hands and flickering
           hands.setOptions({
              maxNumHands: 4, 
              modelComplexity: 0, 
-             minDetectionConfidence: 0.7, // Was 0.5
-             minTrackingConfidence: 0.7  // Was 0.5
+             minDetectionConfidence: 0.7, 
+             minTrackingConfidence: 0.7
           });
 
           hands.onResults((results: Results) => {
-             if (isLoadingModel) {
-                setIsLoadingModel(false);
-             }
+             if (isLoadingModel) setIsLoadingModel(false);
              isDetectingRef.current = false;
 
              const now = Date.now();
-             const rawHands: DetectedHand[] = [];
              
-             // --- ID Tracking Logic ---
-             // We need to match current frame landmarks to previous frame hands to maintain 'stableId'
-             const currentFrameCentroids: {x: number, y: number, assigned: boolean, originalIndex: number}[] = [];
-
+             // --- Advanced Tracking Logic ---
+             
+             // 1. Prepare inputs from MediaPipe
+             const inputCentroids: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
-                results.multiHandLandmarks.forEach((landmarks: HandLandmark[], index: number) => {
-                   const cx = landmarks[9].x;
-                   const cy = landmarks[9].y;
-                   currentFrameCentroids.push({x: cx, y: cy, assigned: false, originalIndex: index});
+                results.multiHandLandmarks.forEach((landmarks, i) => {
+                   inputCentroids.push({x: landmarks[9].x, y: landmarks[9].y, index: i});
                 });
              }
 
-             // Cleanup old tracked hands
-             prevFrameHandsRef.current = prevFrameHandsRef.current.filter(h => now - h.lastSeen < 1000);
+             // 2. Match inputs to existing tracks
+             const activeTracks = tracksRef.current;
+             const matchedInputIndices = new Set<number>();
+             
+             // Mark all tracks as missing first
+             activeTracks.forEach(t => t.missingCount++);
 
-             // Matching
-             const newTrackedHands: {id: number, centroid: {x: number, y: number}, lastSeen: number}[] = [];
-             const finalHands: DetectedHand[] = [];
-
-             // For each current hand, find closest previous hand
-             currentFrameCentroids.forEach((curr) => {
-                 let closestId = -1;
+             // Greedy matching (can be improved to Hungarian Algo if needed, but greedy is fast)
+             activeTracks.forEach(track => {
+                 let closestInputIdx = -1;
                  let minDst = MAX_TRACKING_DISTANCE;
 
-                 prevFrameHandsRef.current.forEach(prev => {
-                     const dst = Math.sqrt(Math.pow(curr.x - prev.centroid.x, 2) + Math.pow(curr.y - prev.centroid.y, 2));
+                 inputCentroids.forEach((input, idx) => {
+                     if (matchedInputIndices.has(idx)) return;
+                     const dst = Math.sqrt(Math.pow(track.centroid.x - input.x, 2) + Math.pow(track.centroid.y - input.y, 2));
                      if (dst < minDst) {
                          minDst = dst;
-                         closestId = prev.id;
+                         closestInputIdx = idx;
                      }
                  });
 
-                 // Assign ID
-                 let stableId;
-                 if (closestId !== -1) {
-                     // Found a match
-                     stableId = closestId;
-                     // Update the prev ref to remove it from being matched again this frame (greedy)
-                     const usedIdx = prevFrameHandsRef.current.findIndex(p => p.id === closestId);
-                     if (usedIdx !== -1) prevFrameHandsRef.current.splice(usedIdx, 1);
+                 if (closestInputIdx !== -1) {
+                     // Found a match: Update track
+                     track.centroid.x = inputCentroids[closestInputIdx].x;
+                     track.centroid.y = inputCentroids[closestInputIdx].y;
+                     track.lastSeen = now;
+                     track.frameCount++;
+                     track.missingCount = 0;
+                     matchedInputIndices.add(closestInputIdx);
+                     
+                     // Store the media pipe index for analysis
+                     (track as any)._tempMpIndex = inputCentroids[closestInputIdx].index;
                  } else {
-                     // New hand
-                     stableId = nextStableId++;
+                     // Track lost this frame
+                     track.frameCount = 0; // Reset consecutive count if tracking is lost? No, just stop incrementing.
                  }
-
-                 newTrackedHands.push({id: stableId, centroid: {x: curr.x, y: curr.y}, lastSeen: now});
-
-                 // Analyze
-                 const label = results.multiHandedness && results.multiHandedness[curr.originalIndex] 
-                      ? results.multiHandedness[curr.originalIndex].label 
-                      : 'Right';
-                 
-                 const handAnalysis = analyzeHand(
-                     results.multiHandLandmarks[curr.originalIndex], 
-                     curr.originalIndex, 
-                     label,
-                     stableId // Pass the persistent ID
-                 );
-                 finalHands.push(handAnalysis);
              });
 
-             // Update tracking ref
-             prevFrameHandsRef.current = newTrackedHands;
+             // 3. Create new tracks for unmatched inputs
+             inputCentroids.forEach((input, idx) => {
+                 if (!matchedInputIndices.has(idx)) {
+                     activeTracks.push({
+                         id: nextStableId++,
+                         centroid: {x: input.x, y: input.y},
+                         lastSeen: now,
+                         frameCount: 1,
+                         missingCount: 0,
+                         // @ts-ignore
+                         _tempMpIndex: input.index 
+                     });
+                 }
+             });
 
-             // Sort for UI consistency (Left to Right)
+             // 4. Filter tracks
+             // - Remove tracks missing for too long
+             // - Only return tracks that have persisted for > FRAME_PERSISTENCE_THRESHOLD (Ghost Hand Fix)
+             let validTracks = activeTracks.filter(t => t.missingCount < MAX_MISSING_FRAMES);
+             tracksRef.current = validTracks; // Update state
+
+             const finalHands: DetectedHand[] = [];
+             
+             validTracks.forEach(track => {
+                 // Only expose this hand if it has been seen consistently
+                 // AND it was actually updated this frame (missingCount === 0)
+                 if (track.frameCount >= FRAME_PERSISTENCE_THRESHOLD && track.missingCount === 0) {
+                     const mpIndex = (track as any)._tempMpIndex;
+                     if (mpIndex !== undefined && results.multiHandLandmarks[mpIndex]) {
+                         const landmarks = results.multiHandLandmarks[mpIndex];
+                         const label = results.multiHandedness && results.multiHandedness[mpIndex] 
+                                      ? results.multiHandedness[mpIndex].label 
+                                      : 'Right';
+                         
+                         const handData = analyzeHand(landmarks, mpIndex, label, track.id);
+                         finalHands.push(handData);
+                     }
+                 }
+             });
+
+             // 5. Sort for display (Visual Order: Left to Right)
              finalHands.sort((a, b) => a.centroid.x - b.centroid.x);
 
              detectedHandsRef.current = finalHands;
@@ -628,4 +630,4 @@ function drawLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: st
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y + 1); // +1 for visual centering
-                     }
+}
