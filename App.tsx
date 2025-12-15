@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
@@ -38,6 +39,7 @@ const App: React.FC = () => {
   const [currentZoom, setCurrentZoom] = useState<number>(1);
 
   // Gesture Tracking Refs
+  // Key: Stable ID (not index)
   const handGestureStates = useRef<Map<number, GestureState>>(new Map());
   
   const lastStateChangeTimeRef = useRef<number>(Date.now());
@@ -137,8 +139,9 @@ const App: React.FC = () => {
     const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
 
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
-      detectedHands.forEach((hand, index) => {
-        let gState = handGestureStates.current.get(index) || { step: 0, lastTime: now };
+      detectedHands.forEach((hand) => {
+        // Use stableId for gesture tracking
+        let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
         
         if (gState.step > 0 && now - gState.lastTime > 1200) { 
           gState = { step: 0, lastTime: now };
@@ -163,11 +166,19 @@ const App: React.FC = () => {
         }
 
         if (nextStep !== gState.step) {
-          handGestureStates.current.set(index, { step: nextStep, lastTime: now });
+          handGestureStates.current.set(hand.stableId, { step: nextStep, lastTime: now });
         } else {
-           handGestureStates.current.set(index, gState);
+           handGestureStates.current.set(hand.stableId, gState);
         }
       });
+      
+      // Garbage collection for gesture states of hands no longer present
+      const currentIds = new Set(detectedHands.map(h => h.stableId));
+      for (const id of handGestureStates.current.keys()) {
+         if (!currentIds.has(id)) {
+            handGestureStates.current.delete(id);
+         }
+      }
     }
 
     if (isGalleryOpen || selectedImage) return;
@@ -318,6 +329,9 @@ const App: React.FC = () => {
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
     const countToSelect = Math.min(winnerCount, poolSize);
     
+    // We select winners based on current array indices (0, 1, 2...) because that's how they are displayed left-to-right.
+    // Stable IDs are for tracking movement, but the "Winner" needs to be visually mapped to the person standing there.
+    // Since detectedHands is sorted by X, index 0 is always the leftmost person.
     const indices = Array.from({ length: poolSize }, (_, i) => i);
     
     for (let i = indices.length - 1; i > 0; i--) {
