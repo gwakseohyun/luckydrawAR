@@ -68,6 +68,11 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                           손바닥을 빠르게 뒤집으면 진행됩니다
                        </div>
                    )}
+                   {gameState === GameState.SHOW_WINNER && (
+                       <div className="bg-blue-600/80 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur animate-pulse border border-white/20">
+                          손을 활짝 펼쳐 당첨 여부를 확인하세요!
+                       </div>
+                   )}
                 </>
             )}
          </div>
@@ -216,10 +221,10 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                     {/* Secondary Action (Reset) */}
                     <button 
                         onClick={onReset}
-                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-0.5 active:scale-95 transition-all min-w-[70px]"
+                        className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1.5 active:scale-95 transition-all min-w-[70px] py-2"
                     >
-                        <RefreshCw className="w-4 h-4 mb-1" />
-                        <span className="text-[10px]">다시 시작</span>
+                        <RefreshCw className="w-4 h-4" />
+                        <span className="text-[10px] whitespace-nowrap">다시 시작</span>
                     </button>
                 </div>
              </div>
