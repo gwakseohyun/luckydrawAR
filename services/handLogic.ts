@@ -99,14 +99,15 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
       fingersUp++;
   }
 
-  // --- 4. Fist Detection Strategy ---
-  // Option A (Strict): 4 fingers folded AND Thumb is not extended.
-  // const isFist = foldedFingersCount === 4 && !isThumbUp;
+  // --- 4. Fist Detection Strategy (Improved) ---
+  // Previous strict logic: const isFist = foldedFingersCount === 4;
   
-  // Option B (Loose - RECOMMENDED): 
-  // If the 4 main fingers are folded, we count it as a fist/ready state.
-  // This solves the issue where a slightly floating thumb or "Thumbs Up" prevents the game from proceeding.
-  const isFist = foldedFingersCount === 4;
+  // NEW RELAXED LOGIC:
+  // If fewer than 2 fingers are up, we consider it a Fist (Rock).
+  // This handles cases where the user thinks they are making a fist but the thumb is sticking out.
+  // Conversely, if 2 or more fingers are up, it is definitely NOT a fist (it's Open/Scissors).
+  // This fixes the "Winner Ball Not Showing" bug when hand is opened.
+  const isFist = fingersUp < 2;
 
   // Centroid (approximate palm center)
   const centroid = {
@@ -130,3 +131,4 @@ export const getSortedHands = (hands: DetectedHand[]) => {
   // Sort hands by X coordinate (Left to Right on screen)
   return [...hands].sort((a, b) => a.centroid.x - b.centroid.x);
 };
+
