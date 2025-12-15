@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
@@ -33,6 +32,7 @@ const App: React.FC = () => {
   const [capturedWinnerIds, setCapturedWinnerIds] = useState<Set<number>>(new Set());
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null); 
+  const captureTimeoutsRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   // Zoom Logic
   const [zoomCaps, setZoomCaps] = useState<{min: number, max: number, step: number} | null>(null);
@@ -74,6 +74,9 @@ const App: React.FC = () => {
     setSelectedImage(null);
     setShouldCapture(false);
     handGestureStates.current.clear();
+    // Clear any pending captures
+    captureTimeoutsRef.current.forEach(t => clearTimeout(t));
+    captureTimeoutsRef.current.clear();
   }, [changeState]);
 
   const handleConfirmParticipants = useCallback(() => {
@@ -294,22 +297,37 @@ const App: React.FC = () => {
         break;
 
       case GameState.SHOW_WINNER: {
-        let newCaptureTriggered = false;
-        const newCapturedIds = new Set(capturedWinnerIds);
-
         detectedHands.forEach(hand => {
+           // Check if this hand is a winner
            if (winningStableIds.includes(hand.stableId)) {
-               if (!hand.isFist && !capturedWinnerIds.has(hand.stableId)) {
-                  newCapturedIds.add(hand.stableId);
-                  newCaptureTriggered = true;
+               const id = hand.stableId;
+               
+               // Logic: Trigger capture if hand is open (not fist) and not captured yet
+               if (!hand.isFist && !capturedWinnerIds.has(id)) {
+                  // If no pending timeout for this ID, start one
+                  if (!captureTimeoutsRef.current.has(id)) {
+                      const timeout = setTimeout(() => {
+                          setCapturedWinnerIds(prev => {
+                              const next = new Set(prev);
+                              next.add(id);
+                              return next;
+                          });
+                          setShouldCapture(true);
+                          captureTimeoutsRef.current.delete(id);
+                      }, 500); // 500ms delay to ensure ball is rendered
+                      
+                      captureTimeoutsRef.current.set(id, timeout);
+                  }
+               } 
+               else if (hand.isFist) {
+                   // If they close their hand before timeout fires, cancel it
+                   if (captureTimeoutsRef.current.has(id)) {
+                       clearTimeout(captureTimeoutsRef.current.get(id));
+                       captureTimeoutsRef.current.delete(id);
+                   }
                }
            }
         });
-
-        if (newCaptureTriggered) {
-           setCapturedWinnerIds(newCapturedIds);
-           setShouldCapture(true);
-        }
         break;
       }
     }
@@ -452,4 +470,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
