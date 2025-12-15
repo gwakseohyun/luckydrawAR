@@ -32,7 +32,8 @@ const lerp = (start: number, end: number, t: number) => {
 // Tracking Configuration
 const MAX_TRACKING_DISTANCE = 0.25; 
 const FRAME_PERSISTENCE_THRESHOLD = 2; 
-const MAX_MISSING_FRAMES = 10; 
+const MAX_MISSING_FRAMES = 30; // Increased from 10 to 30 (approx 0.5s) to survive motion blur
+const WINNER_RECOVERY_DISTANCE = 0.2; // Distance to snap back to a lost winner
 
 // Visual Stabilization Config
 const POS_SMOOTHING_FACTOR = 0.4; 
@@ -381,11 +382,44 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  matchedInputIndices.add(inputIdx);
              });
 
-             // New Tracks
+             // 5. Create new tracks for unmatched inputs
              rawInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
+                     // WINNER RECOVERY LOGIC
+                     // Check if this "new" hand is actually a "lost winner" coming back.
+                     // This prevents the Winner Ball from disappearing if detection is lost momentarily.
+                     let assignedId = nextStableId++;
+                     
+                     if (winningIdsRef.current.length > 0) {
+                         const detectedIds = new Set(activeTracks.map(t => t.id));
+                         // Find winners that are NOT currently tracked
+                         const missingWinners = winningIdsRef.current.filter(wid => !detectedIds.has(wid));
+                         
+                         for (const missingId of missingWinners) {
+                             const lastVis = visualStateMapRef.current.get(missingId);
+                             if (lastVis) {
+                                 // Calculate distance between new input and last known winner pos
+                                 // Input is normalized (0-1), VisualState is in px. Need to normalize visual state or denormalize input.
+                                 // VisualState stores px coords.
+                                 // We have canvasRef.current dimensions.
+                                 const width = canvasRef.current?.width || 1;
+                                 const height = canvasRef.current?.height || 1;
+                                 
+                                 const lastX = lastVis.x / width;
+                                 const lastY = lastVis.y / height;
+                                 
+                                 const distSq = (input.x - lastX)**2 + (input.y - lastY)**2;
+                                 if (distSq < WINNER_RECOVERY_DISTANCE * WINNER_RECOVERY_DISTANCE) {
+                                     assignedId = missingId; // Recover ID
+                                     // Remove any other stale tracks that might claim this ID (unlikely but safe)
+                                     break;
+                                 }
+                             }
+                         }
+                     }
+
                      activeTracks.push({
-                         id: nextStableId++,
+                         id: assignedId,
                          centroid: {x: input.x, y: input.y},
                          lastSeen: now,
                          frameCount: 1,
