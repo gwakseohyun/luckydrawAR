@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
-import { GameState, DetectedHand } from './types';
+import { GameState, DetectedHand, CameraLayerHandle } from './types';
 import { X, RefreshCw, Info, Image as ImageIcon, ZoomIn, Download } from 'lucide-react';
 
 // Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
@@ -23,10 +23,7 @@ const App: React.FC = () => {
   const [maxTimerDuration, setMaxTimerDuration] = useState(3); // Dynamic max duration for UI
   
   const holdStartTimeRef = useRef<number | null>(null);
-  // Grace period ref to prevent timer flickering when tracking is lost briefly
   const lastValidConditionTimeRef = useRef<number>(0);
-  
-  // To prevent flickering numbers from resetting the timer instantly
   const candidateWinnerCountRef = useRef<number | null>(null);
   
   // Capture Logic
@@ -34,28 +31,27 @@ const App: React.FC = () => {
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [capturedWinnerIds, setCapturedWinnerIds] = useState<Set<number>>(new Set());
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null); // For Lightbox
+  const [selectedImage, setSelectedImage] = useState<string | null>(null); 
 
   // Gesture Tracking Refs
   const handGestureStates = useRef<Map<number, GestureState>>(new Map());
   
-  // Safety Refs
   const lastStateChangeTimeRef = useRef<number>(Date.now());
   const participantCountRef = useRef(participantCount);
+  
+  // Camera Ref
+  const cameraLayerRef = useRef<CameraLayerHandle>(null);
 
   useEffect(() => { participantCountRef.current = participantCount; }, [participantCount]);
 
-  // Initialize
   useEffect(() => {
     setGameState(GameState.DETECT_PARTICIPANTS);
   }, []);
 
-  // State Change Handler with Cooldown Tracking
   const changeState = useCallback((newState: GameState) => {
     setGameState(newState);
     lastStateChangeTimeRef.current = Date.now();
     
-    // Reset transient logic refs
     holdStartTimeRef.current = null;
     candidateWinnerCountRef.current = null;
     lastValidConditionTimeRef.current = 0;
@@ -78,8 +74,6 @@ const App: React.FC = () => {
 
   const handleConfirmParticipants = useCallback(() => {
     if (participantCountRef.current < 2) return;
-    
-    // Transition
     setGameState(prev => {
       if (prev === GameState.DETECT_PARTICIPANTS) {
         lastStateChangeTimeRef.current = Date.now();
@@ -109,25 +103,27 @@ const App: React.FC = () => {
     }
   };
 
+  const handleToggleCamera = useCallback(() => {
+    if (cameraLayerRef.current) {
+       cameraLayerRef.current.toggleCamera();
+    }
+  }, []);
+
   // Central Game Loop
   useEffect(() => {
     const now = Date.now();
     const timeSinceStateChange = now - lastStateChangeTimeRef.current;
     
-    // CRITICAL FIX: State Entry Cooldown
     if (timeSinceStateChange < 1000) {
        return; 
     }
 
-    // --- Gesture Detection Logic (Global Reset / Confirm) ---
     const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
 
-    // Only allow gestures for DETECT_PARTICIPANTS (Confirm)
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
       detectedHands.forEach((hand, index) => {
         let gState = handGestureStates.current.get(index) || { step: 0, lastTime: now };
         
-        // Timeout for gesture steps (1.2s limit between flips)
         if (gState.step > 0 && now - gState.lastTime > 1200) { 
           gState = { step: 0, lastTime: now };
         }
@@ -135,7 +131,6 @@ const App: React.FC = () => {
         const facing = hand.facing;
         let nextStep = gState.step;
 
-        // Sequence: Palm -> Back -> Palm -> Back
         if (gState.step === 0) {
           if (facing === 'Palm') nextStep = 1;
         } else if (gState.step === 1) { 
@@ -145,7 +140,6 @@ const App: React.FC = () => {
         } else if (gState.step === 3) { 
           if (facing === 'Back') {
              nextStep = 0; 
-             // ACTION TRIGGER
              if (gameState === GameState.DETECT_PARTICIPANTS) {
                 if (detectedHands.length >= 2) handleConfirmParticipants();
              }
@@ -160,12 +154,9 @@ const App: React.FC = () => {
       });
     }
 
-    // Stop game logic if gallery is showing
     if (isGalleryOpen || selectedImage) return;
 
-    // --- Helper for Timer Logic with Grace Period ---
     const updateTimerWithGracePeriod = (conditionMet: boolean, requiredTimeMs: number, onSuccess: () => void) => {
-       // Update UI Max Timer for consistency
        if (maxTimerDuration !== requiredTimeMs / 1000) {
           setMaxTimerDuration(requiredTimeMs / 1000);
        }
@@ -181,13 +172,9 @@ const App: React.FC = () => {
              onSuccess();
           }
        } else {
-          // Condition failed. Check grace period (500ms).
           if (now - lastValidConditionTimeRef.current > 500) {
-             // Truly failed
              holdStartTimeRef.current = null;
              setTimer(0);
-          } else {
-             // Within grace period: Keep timer value frozen, don't reset immediately
           }
        }
     };
@@ -206,12 +193,10 @@ const App: React.FC = () => {
         break;
 
       case GameState.WAIT_FOR_FISTS_READY: {
-        // Step 2: Everyone makes a fist
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
         const condition = total > 0 && (fistCount / total) >= 0.8;
 
-        // Corrected: Use 3.0 seconds as requested.
         updateTimerWithGracePeriod(condition, 3000, () => {
            changeState(GameState.SET_WINNER_COUNT);
         });
@@ -219,7 +204,6 @@ const App: React.FC = () => {
       }
 
       case GameState.SET_WINNER_COUNT: {
-        // Step 3: Show fingers for count
         const totalFingers = detectedHands.reduce((acc, hand) => acc + hand.fingerCount, 0);
         const maxAllowed = Math.max(1, participantCount - 1);
         const isValidCount = totalFingers >= 1 && totalFingers <= maxAllowed;
@@ -231,14 +215,12 @@ const App: React.FC = () => {
         const isCountStable = isValidCount && candidateWinnerCountRef.current === totalFingers;
 
         if (isValidCount && candidateWinnerCountRef.current !== totalFingers) {
-           // If number changes, reset instantly (no grace period for changing values)
            candidateWinnerCountRef.current = totalFingers;
            holdStartTimeRef.current = now;
            lastValidConditionTimeRef.current = now;
            setTimer(0);
            setWinnerCount(totalFingers);
         } else {
-           // Fix: Use 3.0 seconds here. This is a critical setting that needs stability.
            updateTimerWithGracePeriod(isCountStable, 3000, () => {
               setWinnerCount(totalFingers);
               changeState(GameState.WAIT_FOR_FISTS_PRE_DRAW);
@@ -248,12 +230,10 @@ const App: React.FC = () => {
       }
 
       case GameState.WAIT_FOR_FISTS_PRE_DRAW: {
-        // Step 4: Final Fist before draw
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
         const condition = total > 0 && (fistCount / total) >= 0.8;
 
-        // Fix: Use 3.0 seconds here to build suspense and ensure readiness.
         updateTimerWithGracePeriod(condition, 3000, () => {
              changeState(GameState.DRAWING);
              setTimeout(() => {
@@ -267,14 +247,12 @@ const App: React.FC = () => {
         break;
 
       case GameState.SHOW_WINNER: {
-        // Instant Capture Logic
         let newCaptureTriggered = false;
         const newCapturedIds = new Set(capturedWinnerIds);
 
         winningHandIndices.forEach(winnerIndex => {
            if (winnerIndex < detectedHands.length) {
               const hand = detectedHands[winnerIndex];
-              // If winner is Open Hand AND not captured
               if (!hand.isFist && !capturedWinnerIds.has(winnerIndex)) {
                  newCapturedIds.add(winnerIndex);
                  newCaptureTriggered = true;
@@ -298,7 +276,6 @@ const App: React.FC = () => {
     
     const indices = Array.from({ length: poolSize }, (_, i) => i);
     
-    // Shuffle
     for (let i = indices.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
@@ -314,6 +291,7 @@ const App: React.FC = () => {
       <div className="relative w-full h-full max-w-[1920px] max-h-[1080px] bg-black shadow-2xl overflow-hidden">
         
         <CameraLayer 
+          ref={cameraLayerRef}
           gameState={gameState} 
           onHandsUpdate={setDetectedHands} 
           winningHandIndices={winningHandIndices}
@@ -332,17 +310,14 @@ const App: React.FC = () => {
           warningMessage={warningMessage}
           onOpenGallery={() => setIsGalleryOpen(true)}
           galleryCount={galleryImages.length}
+          onToggleCamera={handleToggleCamera}
         />
 
-        {/* Winner Gallery Popup Modal */}
         {isGalleryOpen && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in p-8">
-            
             <h2 className="text-4xl font-black text-white mb-6 drop-shadow-lg flex items-center gap-3">
               🎉 당첨 결과 갤러리 🎉
             </h2>
-
-            {/* Gallery Grid */}
             <div className={`w-full max-w-6xl max-h-[70vh] overflow-y-auto grid gap-4 p-4 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
                {galleryImages.map((src, idx) => (
                  <div 
@@ -355,8 +330,6 @@ const App: React.FC = () => {
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 cursor-zoom-in" 
                       onClick={() => setSelectedImage(src)}
                     />
-                    
-                    {/* Hover Actions */}
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
                         <button 
                            onClick={() => setSelectedImage(src)}
@@ -371,20 +344,17 @@ const App: React.FC = () => {
                            <Download className="w-8 h-8" />
                         </button>
                     </div>
-
                     <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 flex justify-between items-end">
                        <span className="text-white font-bold">순간 포착 #{idx + 1}</span>
                     </div>
                  </div>
                ))}
-               
                {galleryImages.length === 0 && (
                   <div className="col-span-full text-white/50 text-center py-20 text-xl">
                      아직 포착된 당첨 순간이 없습니다.
                   </div>
                )}
             </div>
-            
             <div className="mt-8 flex flex-col items-center gap-4">
                <div className="flex gap-4">
                  <button 
@@ -393,7 +363,6 @@ const App: React.FC = () => {
                  >
                    <RefreshCw className="w-6 h-6" /> 다시 시작하기
                  </button>
-                 
                  <button 
                    onClick={() => setIsGalleryOpen(false)}
                    className="flex items-center gap-2 px-6 py-4 bg-white/20 hover:bg-white/30 text-white font-bold rounded-full backdrop-blur-md transition-colors"
@@ -405,7 +374,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Lightbox (Full Screen Image View) */}
         {selectedImage && (
            <div 
              className="absolute inset-0 z-50 bg-black/95 flex items-center justify-center p-4 animate-fade-in"
@@ -417,8 +385,6 @@ const App: React.FC = () => {
                    alt="Full Screen" 
                    className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl border border-gray-800"
                  />
-                 
-                 {/* Lightbox Actions */}
                  <div className="absolute top-4 right-4 flex gap-2">
                      <button 
                        className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
@@ -443,7 +409,6 @@ const App: React.FC = () => {
               </div>
            </div>
         )}
-        
       </div>
     </div>
   );
