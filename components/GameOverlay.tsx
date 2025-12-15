@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { GameState } from '../types';
 import { INSTRUCTIONS, COLORS } from '../constants';
-import { RefreshCw, Camera, Users, Trophy, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp } from 'lucide-react';
+import { RefreshCw, Users, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface GameOverlayProps {
   gameState: GameState;
@@ -37,6 +37,8 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
     gameState === GameState.WAIT_FOR_FISTS_READY ||
     gameState === GameState.WAIT_FOR_FISTS_PRE_DRAW;
 
+  const isDetecting = gameState === GameState.DETECT_PARTICIPANTS;
+
   const CIRCUMFERENCE = 377;
   const progress = Math.min(timer / maxDuration, 1);
   const strokeDashoffset = CIRCUMFERENCE - (CIRCUMFERENCE * progress);
@@ -45,59 +47,57 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between z-10 safe-area-inset">
       
-      {/* Top Bar - Compact & Transparent */}
-      <div className="w-full flex justify-between items-start p-4 bg-gradient-to-b from-black/80 to-transparent pb-12">
-        <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
-          <Camera className="w-4 h-4 text-white" />
-          <span className="font-bold text-white text-sm">Lucky Draw</span>
-           {gameState !== GameState.IDLE && (
-              <div className="flex items-center gap-1 ml-1 border-l border-white/20 pl-2">
-                 <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                 <span className="text-[10px] font-bold text-green-400">LIVE</span>
-              </div>
-           )}
-        </div>
-        
-        <div className="flex items-center gap-3">
-           {onToggleCamera && (
-             <button 
-               onClick={onToggleCamera}
-               className="pointer-events-auto p-2.5 bg-black/40 hover:bg-white/20 backdrop-blur-md rounded-full text-white border border-white/10 transition-all active:scale-95"
-               aria-label="카메라 전환"
-             >
-               <SwitchCamera className="w-5 h-5" />
-             </button>
-           )}
-           <button 
-             onClick={onReset}
-             className="pointer-events-auto p-2.5 bg-black/40 hover:bg-white/20 backdrop-blur-md rounded-full text-white border border-white/10 transition-all active:scale-95"
-             aria-label="초기화"
-           >
-              <RefreshCw className="w-5 h-5" />
-           </button>
-        </div>
+      {/* Top Section: Tips, Warnings, Camera Toggle */}
+      <div className="w-full flex justify-between items-start p-4 pt-6">
+         {/* Top Left/Center Dynamic Info */}
+         <div className="flex-1 flex justify-center">
+            {warningMessage ? (
+               <div className="animate-bounce-short bg-red-500/90 text-white px-4 py-1.5 rounded-full shadow-lg backdrop-blur flex items-center gap-2">
+                   <AlertTriangle className="w-4 h-4" />
+                   <span className="text-xs font-bold">{warningMessage}</span>
+               </div>
+            ) : (
+                <>
+                   {isDetecting && participantCount < 2 && (
+                       <div className="bg-red-500/80 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur">
+                          최소 2명이 필요합니다
+                       </div>
+                   )}
+                   {isDetecting && participantCount >= 2 && (
+                       <div className="bg-black/40 text-white/90 px-4 py-1.5 rounded-full text-xs font-medium border border-white/10 backdrop-blur">
+                          손바닥을 빠르게 뒤집으면 진행됩니다
+                       </div>
+                   )}
+                </>
+            )}
+         </div>
+
+         {/* Camera Toggle with Live Indicator */}
+         <div className="absolute top-4 right-4 pointer-events-auto">
+            {onToggleCamera && (
+                <button 
+                  onClick={onToggleCamera}
+                  className="relative p-3 bg-black/40 hover:bg-white/20 backdrop-blur-md rounded-full text-white border border-white/10 transition-all active:scale-95 shadow-lg"
+                  aria-label="카메라 전환"
+                >
+                  <SwitchCamera className="w-6 h-6" />
+                  {/* Live Indicator inside the lens area */}
+                  <span className="absolute top-3 right-3 w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+                </button>
+            )}
+         </div>
       </div>
 
-      {/* Center Feedback (Timer/Counts) - Optimized for visibility */}
-      <div className="flex-1 flex flex-col items-center justify-center pointer-events-none relative">
+      {/* Center Feedback (Timer/Counts) */}
+      <div className="flex-1 flex flex-col items-center justify-center pointer-events-none relative pb-20">
         
-        {/* Warning Toast */}
-        {warningMessage && (
-           <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 w-max max-w-[90vw] animate-bounce-short z-50">
-             <div className="bg-red-500/90 text-white px-4 py-2 rounded-full shadow-xl flex items-center gap-2 backdrop-blur-sm">
-                <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                <span className="font-bold text-sm">{warningMessage}</span>
-             </div>
-           </div>
-        )}
-
         {/* Big Counter */}
-        {gameState === GameState.DETECT_PARTICIPANTS && (
+        {isDetecting && (
           <div className="flex flex-col items-center">
              <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter">
-               {participantCount}
+               {participantCount}명
              </span>
-             <span className="text-xl text-white font-bold drop-shadow-md -mt-2">명 감지됨</span>
+             <span className="text-2xl text-white font-bold drop-shadow-md -mt-2">감지됨</span>
           </div>
         )}
 
@@ -134,40 +134,14 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
              </div>
            </div>
         )}
-        
-        {/* Winner Reveal */}
-        {gameState === GameState.SHOW_WINNER && (
-          <div className="flex flex-col items-center animate-fade-in p-6 bg-black/40 backdrop-blur-sm rounded-3xl border border-white/10 mx-4">
-             <Trophy className="w-12 h-12 text-yellow-400 mb-2 drop-shadow-glow" />
-             <h1 className="text-4xl md:text-5xl font-black text-white drop-shadow-lg text-center mb-2">
-               당첨 축하!
-             </h1>
-             <p className="text-white/80 text-sm mb-6 text-center">황금볼을 확인하세요!</p>
-             
-             <button 
-                onClick={onOpenGallery}
-                className="pointer-events-auto flex items-center gap-2 bg-yellow-400 hover:bg-yellow-500 text-black px-6 py-3 rounded-full shadow-xl transition-transform active:scale-95"
-             >
-                <div className="relative">
-                   <ImageIcon className="w-5 h-5" />
-                   {galleryCount > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 bg-red-600 text-white text-[9px] w-4 h-4 flex items-center justify-center rounded-full border border-white font-bold">
-                        {galleryCount}
-                      </span>
-                   )}
-                </div>
-                <span className="text-base font-bold">결과 보기</span>
-             </button>
-          </div>
-        )}
       </div>
 
       {/* Bottom Bar - Mobile Friendly HUD */}
       <div className="w-full p-4 pointer-events-auto">
         <div className={`
-            bg-black/70 backdrop-blur-xl border border-white/10 rounded-2xl 
-            transition-all duration-300 ease-spring
-            ${isInstructionExpanded ? 'p-4' : 'p-3'}
+            bg-black/70 backdrop-blur-xl border border-white/10 rounded-3xl 
+            transition-all duration-300 ease-spring shadow-2xl
+            ${isInstructionExpanded ? 'p-5' : 'p-3'}
         `}>
           {/* Header / Toggle */}
           <div 
@@ -177,7 +151,7 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
              <div className="flex items-center gap-2 text-white">
                 <Info className="w-4 h-4 text-yellow-400" />
                 <span className="font-bold text-sm">
-                   {gameState === GameState.DETECT_PARTICIPANTS ? "참가 인원 설정" : "게임 진행 안내"}
+                   {isDetecting ? "참가 인원 설정" : "게임 진행 안내"}
                 </span>
              </div>
              <button className="text-white/50 hover:text-white">
@@ -187,48 +161,67 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
 
           {/* Expanded Content */}
           {isInstructionExpanded && (
-             <div className="mt-3 text-sm text-gray-200">
-                <p className="mb-3 leading-relaxed">
-                   {gameState === GameState.DETECT_PARTICIPANTS 
-                      ? "카메라에 손바닥을 보여주세요. 2명 이상 모이면 게임을 시작할 수 있습니다." 
-                      : INSTRUCTIONS[gameState]}
-                </p>
+             <div className="mt-4 text-sm text-gray-200">
+                <div className="mb-4 leading-relaxed text-center font-medium">
+                   {isDetecting ? (
+                       <>
+                         <p>카메라에 손바닥을 보여주세요.</p>
+                         <p className="text-white/70 text-xs mt-1">2명 이상 모이면 게임을 시작할 수 있습니다.</p>
+                       </>
+                   ) : (
+                       <p>{INSTRUCTIONS[gameState]}</p>
+                   )}
+                </div>
 
-                {gameState === GameState.DETECT_PARTICIPANTS && (
-                   <div className="bg-white/10 rounded-lg p-2 text-xs text-gray-300 flex items-start gap-2 mb-3">
-                      <span className="mt-0.5 text-yellow-400">💡</span>
-                      <span>Tip: 손바닥과 손등을 빠르게 두 번 뒤집으면(✋🤚✋🤚) 버튼 없이 바로 시작됩니다.</span>
-                   </div>
-                )}
+                {/* Actions Grid */}
+                <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+                    {/* Primary Action */}
+                    <div className="w-full">
+                        {isDetecting && (
+                           <>
+                             {participantCount >= 2 ? (
+                               <button 
+                                 onClick={onConfirmParticipants}
+                                 className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                               >
+                                 {participantCount}명으로 시작하기 <Users className="w-4 h-4"/>
+                               </button>
+                            ) : (
+                               <div className="w-full bg-white/5 text-white/30 font-bold py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                                 인원 모으는 중...
+                               </div>
+                            )}
+                           </>
+                        )}
+                        
+                        {gameState === GameState.SHOW_WINNER && (
+                            <button 
+                                onClick={onOpenGallery}
+                                className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                            >
+                                <ImageIcon className="w-4 h-4" /> 결과 보기 
+                                {galleryCount > 0 && <span className="bg-red-600 text-white text-[10px] px-1.5 rounded-full">{galleryCount}</span>}
+                            </button>
+                        )}
+
+                        {!isDetecting && gameState !== GameState.SHOW_WINNER && (
+                           <div className="w-full bg-white/5 text-white/50 py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                              제스처를 인식하고 있습니다...
+                           </div>
+                        )}
+                    </div>
+
+                    {/* Secondary Action (Reset) */}
+                    <button 
+                        onClick={onReset}
+                        className="h-full px-4 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px]"
+                    >
+                        <RefreshCw className="w-4 h-4" />
+                        <span className="text-[10px]">다시 시작</span>
+                    </button>
+                </div>
              </div>
           )}
-          
-          {/* Action Button Area */}
-          {gameState === GameState.DETECT_PARTICIPANTS && (
-             <div className={`mt-2 ${!isInstructionExpanded ? 'hidden' : 'block'}`}>
-                {participantCount >= 2 ? (
-                   <button 
-                     onClick={onConfirmParticipants}
-                     className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
-                   >
-                     {participantCount}명으로 시작하기 <Users className="w-4 h-4"/>
-                   </button>
-                ) : (
-                   <button disabled className="w-full bg-white/10 text-white/40 font-bold py-3 rounded-xl border border-white/5 cursor-not-allowed text-xs">
-                     최소 2명이 필요합니다
-                   </button>
-                )}
-             </div>
-           )}
-
-           {gameState === GameState.SHOW_WINNER && isInstructionExpanded && (
-               <button 
-                  onClick={onReset}
-                  className="w-full mt-2 bg-white/20 hover:bg-white/30 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
-               >
-                  새로운 게임 시작
-               </button>
-           )}
         </div>
       </div>
 
