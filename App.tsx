@@ -49,7 +49,12 @@ const App: React.FC = () => {
   useEffect(() => { participantCountRef.current = participantCount; }, [participantCount]);
 
   useEffect(() => {
-    setGameState(GameState.DETECT_PARTICIPANTS);
+    // Start in SETUP mode instead of DETECT directly
+    // Wait for initial render/mount then go to SETUP
+    const t = setTimeout(() => {
+        setGameState(GameState.SETUP);
+    }, 100);
+    return () => clearTimeout(t);
   }, []);
 
   const changeState = useCallback((newState: GameState) => {
@@ -63,9 +68,10 @@ const App: React.FC = () => {
   }, []);
 
   const handleReset = useCallback(() => {
-    changeState(GameState.DETECT_PARTICIPANTS);
+    // Reset goes back to SETUP to allow changing winner count
+    changeState(GameState.SETUP);
     setParticipantCount(0);
-    setWinnerCount(1);
+    // Don't reset winnerCount here, keep the user's preference
     setWinningStableIds([]);
     setGalleryImages([]);
     setCapturedWinnerIds(new Set());
@@ -73,9 +79,12 @@ const App: React.FC = () => {
     setSelectedImage(null);
     setShouldCapture(false);
     handGestureStates.current.clear();
-    // Clear any pending captures
     captureTimeoutsRef.current.forEach(t => clearTimeout(t));
     captureTimeoutsRef.current.clear();
+  }, [changeState]);
+
+  const handleStartDetection = useCallback(() => {
+     changeState(GameState.DETECT_PARTICIPANTS);
   }, [changeState]);
 
   const handleConfirmParticipants = useCallback(() => {
@@ -83,7 +92,6 @@ const App: React.FC = () => {
     setGameState(prev => {
       if (prev === GameState.DETECT_PARTICIPANTS) {
         lastStateChangeTimeRef.current = Date.now();
-        // Skip the complex finger counting step, go straight to Ready
         return GameState.WAIT_FOR_FISTS_READY;
       }
       return prev;
@@ -92,10 +100,9 @@ const App: React.FC = () => {
 
   const updateWinnerCount = useCallback((delta: number) => {
     setWinnerCount(prev => {
-      const max = Math.max(1, participantCountRef.current - 1);
       const next = prev + delta;
       if (next < 1) return 1;
-      if (next > max) return max;
+      if (next > 20) return 20; // Cap at 20 or reasonable max
       return next;
     });
   }, []);
@@ -183,7 +190,7 @@ const App: React.FC = () => {
         }
       });
       
-      // Cleanup missing hands from gesture map
+      // Cleanup
       const currentStableIds = new Set(detectedHands.map(h => h.stableId));
       for (const id of handGestureStates.current.keys()) {
           if (!currentStableIds.has(id)) {
@@ -230,11 +237,9 @@ const App: React.FC = () => {
       case GameState.DETECT_PARTICIPANTS:
         if (detectedHands.length > 0) {
            setParticipantCount(detectedHands.length);
-           // Auto-adjust winner count if it exceeds possible max
-           setWinnerCount(prev => {
-              const max = Math.max(1, detectedHands.length - 1);
-              return prev > max ? max : prev;
-           });
+           // NOTE: We no longer auto-clamp winnerCount here. 
+           // Winner Count is set in SETUP state and acts as a "Target".
+           // Only clamping happens at draw time.
         }
         break;
 
@@ -266,13 +271,9 @@ const App: React.FC = () => {
 
       case GameState.SHOW_WINNER: {
         detectedHands.forEach(hand => {
-           // Check if this hand is a winner
            if (winningStableIds.includes(hand.stableId)) {
                const id = hand.stableId;
-               
-               // Logic: Trigger capture if hand is open (not fist) and not captured yet
                if (!hand.isFist && !capturedWinnerIds.has(id)) {
-                  // If no pending timeout for this ID, start one
                   if (!captureTimeoutsRef.current.has(id)) {
                       const timeout = setTimeout(() => {
                           setCapturedWinnerIds(prev => {
@@ -282,13 +283,11 @@ const App: React.FC = () => {
                           });
                           setShouldCapture(true);
                           captureTimeoutsRef.current.delete(id);
-                      }, 500); // 500ms delay to ensure ball is rendered
-                      
+                      }, 500); 
                       captureTimeoutsRef.current.set(id, timeout);
                   }
                } 
                else if (hand.isFist) {
-                   // If they close their hand before timeout fires, cancel it
                    if (captureTimeoutsRef.current.has(id)) {
                        clearTimeout(captureTimeoutsRef.current.get(id));
                        captureTimeoutsRef.current.delete(id);
@@ -303,7 +302,10 @@ const App: React.FC = () => {
 
   const performDraw = () => {
     const currentHandCount = detectedHands.length;
+    // Use participantCount if hands are missing, but ideally use current detected hands for pool
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
+    
+    // Clamp winner count to pool size at the moment of draw
     const countToSelect = Math.min(winnerCount, poolSize);
     
     const indices = Array.from({ length: poolSize }, (_, i) => i);
@@ -314,7 +316,6 @@ const App: React.FC = () => {
     
     const winningIndices = indices.slice(0, countToSelect);
     
-    // Freeze winners by stableId
     const winningIds = winningIndices.map(idx => {
        if (detectedHands[idx]) return detectedHands[idx].stableId;
        return -1;
@@ -345,6 +346,7 @@ const App: React.FC = () => {
           timer={timer}
           maxDuration={maxTimerDuration} 
           onReset={handleReset}
+          onStartDetection={handleStartDetection}
           onConfirmParticipants={handleConfirmParticipants}
           warningMessage={warningMessage}
           onOpenGallery={() => setIsGalleryOpen(true)}
@@ -356,7 +358,6 @@ const App: React.FC = () => {
           onUpdateWinnerCount={updateWinnerCount}
         />
 
-        {/* ... Gallery Modal & Selected Image Modal codes remain same ... */}
         {isGalleryOpen && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
             <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
@@ -387,7 +388,7 @@ const App: React.FC = () => {
                    onClick={handleReset}
                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-black text-lg font-bold rounded-xl shadow-lg active:scale-95 whitespace-nowrap"
                  >
-                   <RefreshCw className="w-5 h-5" /> 다시 시작하기
+                   <RefreshCw className="w-5 h-5" /> 처음으로
                  </button>
                  <button 
                    onClick={() => setIsGalleryOpen(false)}
