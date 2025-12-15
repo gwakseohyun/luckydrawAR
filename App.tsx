@@ -25,7 +25,6 @@ const App: React.FC = () => {
   
   const holdStartTimeRef = useRef<number | null>(null);
   const lastValidConditionTimeRef = useRef<number>(0);
-  const candidateWinnerCountRef = useRef<number | null>(null);
   
   // Capture Logic
   const [shouldCapture, setShouldCapture] = useState(false);
@@ -58,7 +57,6 @@ const App: React.FC = () => {
     lastStateChangeTimeRef.current = Date.now();
     
     holdStartTimeRef.current = null;
-    candidateWinnerCountRef.current = null;
     lastValidConditionTimeRef.current = 0;
     setTimer(0);
     setWarningMessage(null);
@@ -85,9 +83,20 @@ const App: React.FC = () => {
     setGameState(prev => {
       if (prev === GameState.DETECT_PARTICIPANTS) {
         lastStateChangeTimeRef.current = Date.now();
+        // Skip the complex finger counting step, go straight to Ready
         return GameState.WAIT_FOR_FISTS_READY;
       }
       return prev;
+    });
+  }, []);
+
+  const updateWinnerCount = useCallback((delta: number) => {
+    setWinnerCount(prev => {
+      const max = Math.max(1, participantCountRef.current - 1);
+      const next = prev + delta;
+      if (next < 1) return 1;
+      if (next > max) return max;
+      return next;
     });
   }, []);
 
@@ -134,14 +143,13 @@ const App: React.FC = () => {
     const now = Date.now();
     const timeSinceStateChange = now - lastStateChangeTimeRef.current;
     
-    // Reduced from 1000ms to 300ms to improve responsiveness.
-    // The previous 1s delay made the 3s timer feel like 4s.
     if (timeSinceStateChange < 300) {
        return; 
     }
 
     const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
 
+    // Gesture control for Confirm (Step 0 -> Step 4)
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
       detectedHands.forEach((hand) => {
         let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
@@ -213,7 +221,7 @@ const App: React.FC = () => {
       if (gameState === GameState.DETECT_PARTICIPANTS) {
         setParticipantCount(0);
       }
-      if (gameState === GameState.WAIT_FOR_FISTS_READY || gameState === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
+      if (gameState === GameState.WAIT_FOR_FISTS_READY) {
          setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
       }
     }
@@ -222,58 +230,15 @@ const App: React.FC = () => {
       case GameState.DETECT_PARTICIPANTS:
         if (detectedHands.length > 0) {
            setParticipantCount(detectedHands.length);
+           // Auto-adjust winner count if it exceeds possible max
+           setWinnerCount(prev => {
+              const max = Math.max(1, detectedHands.length - 1);
+              return prev > max ? max : prev;
+           });
         }
         break;
 
       case GameState.WAIT_FOR_FISTS_READY: {
-        const fistCount = detectedHands.filter(h => h.isFist).length;
-        const total = detectedHands.length;
-        const isAllParticipantsVisible = total >= participantCount;
-        const isAllFists = fistCount >= participantCount;
-        
-        const condition = isAllParticipantsVisible && isAllFists;
-
-        if (!isAllParticipantsVisible) {
-           setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
-        } else if (!isAllFists) {
-           setWarningMessage("모두 주먹을 쥐어주세요.");
-        } else {
-           setWarningMessage(null);
-        }
-
-        updateTimerWithGracePeriod(condition, 3000, () => {
-           changeState(GameState.SET_WINNER_COUNT);
-        });
-        break;
-      }
-
-      case GameState.SET_WINNER_COUNT: {
-        const totalFingers = detectedHands.reduce((acc, hand) => acc + hand.fingerCount, 0);
-        const maxAllowed = Math.max(1, participantCount - 1);
-        const isValidCount = totalFingers >= 1 && totalFingers <= maxAllowed;
-
-        if (totalFingers === 0) setWarningMessage("최소 1명 이상이어야 합니다.");
-        else if (totalFingers >= participantCount) setWarningMessage(`참가자 수(${participantCount}명)보다 적어야 합니다.`);
-        else setWarningMessage(null);
-
-        const isCountStable = isValidCount && candidateWinnerCountRef.current === totalFingers;
-
-        if (isValidCount && candidateWinnerCountRef.current !== totalFingers) {
-           candidateWinnerCountRef.current = totalFingers;
-           holdStartTimeRef.current = now;
-           lastValidConditionTimeRef.current = now;
-           setTimer(0);
-           setWinnerCount(totalFingers);
-        } else {
-           updateTimerWithGracePeriod(isCountStable, 3000, () => {
-              setWinnerCount(totalFingers);
-              changeState(GameState.WAIT_FOR_FISTS_PRE_DRAW);
-           });
-        }
-        break;
-      }
-
-      case GameState.WAIT_FOR_FISTS_PRE_DRAW: {
         const fistCount = detectedHands.filter(h => h.isFist).length;
         const total = detectedHands.length;
         const isAllParticipantsVisible = total >= participantCount;
@@ -388,8 +353,10 @@ const App: React.FC = () => {
           zoomCapabilities={zoomCaps}
           currentZoom={currentZoom}
           onZoomChange={handleZoomChange}
+          onUpdateWinnerCount={updateWinnerCount}
         />
 
+        {/* ... Gallery Modal & Selected Image Modal codes remain same ... */}
         {isGalleryOpen && (
           <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
             <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
@@ -473,3 +440,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
