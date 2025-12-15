@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -12,7 +13,7 @@ interface Results {
 interface CameraLayerProps {
   gameState: GameState;
   onHandsUpdate: (hands: DetectedHand[]) => void;
-  winningHandIndices: number[];
+  winningHandIndices: number[]; // Now interpreted as Stable IDs in some contexts, but mostly visual indices
   triggerCapture: boolean;
   onCaptureComplete: (images: string[]) => void;
   onZoomInit?: (min: number, max: number, step: number, current: number) => void;
@@ -27,6 +28,10 @@ declare global {
 const lerp = (start: number, end: number, t: number) => {
   return start * (1 - t) + end * t;
 };
+
+// Tracking helper to maintain IDs across frames based on proximity
+const MAX_TRACKING_DISTANCE = 0.2; // 20% of screen width movement allowed per frame
+let nextStableId = 0;
 
 const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
   gameState, 
@@ -59,7 +64,7 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
   
   // Data Refs
   const detectedHandsRef = useRef<DetectedHand[]>([]);
-  const prevFrameCentroidsRef = useRef<{x: number, y: number}[]>([]);
+  const prevFrameHandsRef = useRef<{id: number, centroid: {x: number, y: number}, lastSeen: number}[]>([]);
   const visualSmoothMapRef = useRef<Map<number, {x: number, y: number}>>(new Map());
   
   // Loop Control Refs
@@ -254,20 +259,26 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
               const targetX = hand.centroid.x * canvas.width;
               const targetY = hand.centroid.y * canvas.height;
 
-              let prevPos = visualSmoothMap.get(sortedIndex);
+              // Smoothing for visual stability
+              let prevPos = visualSmoothMap.get(hand.stableId);
               if (!prevPos) prevPos = { x: targetX, y: targetY };
 
               const smoothX = lerp(prevPos.x, targetX, 0.4);
               const smoothY = lerp(prevPos.y, targetY, 0.4);
-              visualSmoothMap.set(sortedIndex, { x: smoothX, y: smoothY });
+              visualSmoothMap.set(hand.stableId, { x: smoothX, y: smoothY });
 
+              // Check if this hand's index (in the sorted array) is a winner
+              // Winners are stored as indices of the sorted array for the current game round
               const isWinner = currentWinners.includes(sortedIndex);
+              
               drawHandOverlay(ctx, smoothX, smoothY, hand, currentGameState, sortedIndex, isWinner);
            });
            
-           if (visualSmoothMap.size > hands.length) {
-              for (let i = hands.length; i < visualSmoothMap.size + 5; i++) {
-                 visualSmoothMap.delete(i);
+           // Cleanup visual map
+           const currentIds = new Set(hands.map(h => h.stableId));
+           for (const id of visualSmoothMap.keys()) {
+              if (!currentIds.has(id)) {
+                 visualSmoothMap.delete(id);
               }
            }
         }
@@ -312,11 +323,12 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
           });
 
+          // Increased confidence to reduce ghost hands and flickering
           hands.setOptions({
              maxNumHands: 4, 
              modelComplexity: 0, 
-             minDetectionConfidence: 0.5,
-             minTrackingConfidence: 0.5
+             minDetectionConfidence: 0.7, // Was 0.5
+             minTrackingConfidence: 0.7  // Was 0.5
           });
 
           hands.onResults((results: Results) => {
@@ -325,39 +337,78 @@ const CameraLayer = forwardRef<CameraLayerHandle, CameraLayerProps>(({
              }
              isDetectingRef.current = false;
 
+             const now = Date.now();
              const rawHands: DetectedHand[] = [];
+             
+             // --- ID Tracking Logic ---
+             // We need to match current frame landmarks to previous frame hands to maintain 'stableId'
+             const currentFrameCentroids: {x: number, y: number, assigned: boolean, originalIndex: number}[] = [];
+
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks: HandLandmark[], index: number) => {
-                   const label = results.multiHandedness && results.multiHandedness[index] 
-                      ? results.multiHandedness[index].label 
-                      : 'Right';
-                   rawHands.push(analyzeHand(landmarks, index, label));
+                   const cx = landmarks[9].x;
+                   const cy = landmarks[9].y;
+                   currentFrameCentroids.push({x: cx, y: cy, assigned: false, originalIndex: index});
                 });
              }
-             
-             let sorted = [...rawHands];
-             sorted.sort((a, b) => a.centroid.x - b.centroid.x);
-             
-             // Logic Smoothing
-             if (prevFrameCentroidsRef.current.length > 0 && sorted.length > 0) {
-                sorted.forEach(hand => {
-                   let closestIdx = -1;
-                   let minDist = Infinity;
-                   prevFrameCentroidsRef.current.forEach((prev, idx) => {
-                      const d = Math.sqrt(Math.pow(hand.centroid.x - prev.x, 2) + Math.pow(hand.centroid.y - prev.y, 2));
-                      if (d < minDist) { minDist = d; closestIdx = idx; }
-                   });
-                   if (closestIdx !== -1 && minDist < 0.2) {
-                      const prev = prevFrameCentroidsRef.current[closestIdx];
-                      hand.centroid.x = lerp(prev.x, hand.centroid.x, 0.5);
-                      hand.centroid.y = lerp(prev.y, hand.centroid.y, 0.5);
-                   }
-                });
-             }
-             prevFrameCentroidsRef.current = sorted.map(h => ({ x: h.centroid.x, y: h.centroid.y }));
 
-             detectedHandsRef.current = sorted;
-             onHandsUpdate(sorted);
+             // Cleanup old tracked hands
+             prevFrameHandsRef.current = prevFrameHandsRef.current.filter(h => now - h.lastSeen < 1000);
+
+             // Matching
+             const newTrackedHands: {id: number, centroid: {x: number, y: number}, lastSeen: number}[] = [];
+             const finalHands: DetectedHand[] = [];
+
+             // For each current hand, find closest previous hand
+             currentFrameCentroids.forEach((curr) => {
+                 let closestId = -1;
+                 let minDst = MAX_TRACKING_DISTANCE;
+
+                 prevFrameHandsRef.current.forEach(prev => {
+                     const dst = Math.sqrt(Math.pow(curr.x - prev.centroid.x, 2) + Math.pow(curr.y - prev.centroid.y, 2));
+                     if (dst < minDst) {
+                         minDst = dst;
+                         closestId = prev.id;
+                     }
+                 });
+
+                 // Assign ID
+                 let stableId;
+                 if (closestId !== -1) {
+                     // Found a match
+                     stableId = closestId;
+                     // Update the prev ref to remove it from being matched again this frame (greedy)
+                     const usedIdx = prevFrameHandsRef.current.findIndex(p => p.id === closestId);
+                     if (usedIdx !== -1) prevFrameHandsRef.current.splice(usedIdx, 1);
+                 } else {
+                     // New hand
+                     stableId = nextStableId++;
+                 }
+
+                 newTrackedHands.push({id: stableId, centroid: {x: curr.x, y: curr.y}, lastSeen: now});
+
+                 // Analyze
+                 const label = results.multiHandedness && results.multiHandedness[curr.originalIndex] 
+                      ? results.multiHandedness[curr.originalIndex].label 
+                      : 'Right';
+                 
+                 const handAnalysis = analyzeHand(
+                     results.multiHandLandmarks[curr.originalIndex], 
+                     curr.originalIndex, 
+                     label,
+                     stableId // Pass the persistent ID
+                 );
+                 finalHands.push(handAnalysis);
+             });
+
+             // Update tracking ref
+             prevFrameHandsRef.current = newTrackedHands;
+
+             // Sort for UI consistency (Left to Right)
+             finalHands.sort((a, b) => a.centroid.x - b.centroid.x);
+
+             detectedHandsRef.current = finalHands;
+             onHandsUpdate(finalHands);
           });
           handsRef.current = hands;
       }
@@ -490,6 +541,7 @@ function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, ha
   } else if (state === GameState.DETECT_PARTICIPANTS) {
       ctx.strokeStyle = COLORS.primary;
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, 15);
+      // Use sortedIndex for display order, but the logic underlying this is stable due to stableId
       drawLabel(ctx, x, y - size/2 - 20, `#${sortedIndex + 1}`, COLORS.primary);
   } else if (state === GameState.WAIT_FOR_FISTS_READY || state === GameState.WAIT_FOR_FISTS_PRE_DRAW) {
       const color = hand.isFist ? COLORS.success : COLORS.accent;
