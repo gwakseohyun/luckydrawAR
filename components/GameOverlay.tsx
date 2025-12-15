@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+
+import React, { useState, memo } from 'react';
 import { GameState } from '../types';
 import { INSTRUCTIONS, COLORS } from '../constants';
-import { RefreshCw, Users, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play } from 'lucide-react';
+import { RefreshCw, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play } from 'lucide-react';
 
 interface GameOverlayProps {
   gameState: GameState;
@@ -20,7 +21,7 @@ interface GameOverlayProps {
   onZoomChange?: (value: number) => void;
 }
 
-const GameOverlay: React.FC<GameOverlayProps> = ({
+const GameOverlay: React.FC<GameOverlayProps> = memo(({
   gameState,
   participantCount,
   winnerCount,
@@ -53,9 +54,8 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between z-10 safe-area-inset">
       
-      {/* Top Section: Tips, Warnings, Camera Toggle */}
+      {/* Top Section */}
       <div className="w-full flex justify-between items-start p-4 pt-6 relative">
-         {/* Top Left/Center Dynamic Info */}
          <div className="flex-1 flex justify-center pt-2">
             {warningMessage ? (
                <div className="animate-bounce-short bg-red-500/90 text-white px-4 py-1.5 rounded-full shadow-lg backdrop-blur flex items-center gap-2">
@@ -83,7 +83,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
             )}
          </div>
 
-         {/* Camera Toggle with Live Indicator */}
          <div className="absolute top-4 right-4 pointer-events-auto">
             {onToggleCamera && (
                 <button 
@@ -92,7 +91,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                   aria-label="카메라 전환"
                 >
                   <SwitchCamera className="w-6 h-6" />
-                  {/* Live Indicator Centered */}
                   <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
                   </div>
@@ -101,10 +99,9 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
          </div>
       </div>
 
-      {/* Center Feedback (Timer/Counts) */}
+      {/* Center Feedback */}
       <div className="flex-1 flex flex-col items-center justify-start pt-32 pointer-events-none relative pb-20">
         
-        {/* Big Counter */}
         {isDetecting && (
           <div className="flex flex-col items-center gap-2">
              <span className="text-8xl font-black text-yellow-400 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] tracking-tighter leading-none">
@@ -114,7 +111,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
           </div>
         )}
 
-        {/* Hold Timer */}
         {isHolding && timer > 0 && (
            <div className="flex items-center justify-center mt-10">
              <div className="relative flex items-center justify-center w-40 h-40">
@@ -138,7 +134,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
            </div>
         )}
         
-        {/* Step 3 Count Feedback */}
         {gameState === GameState.SET_WINNER_COUNT && winnerCount > 0 && !warningMessage && (
            <div className="mt-8 flex flex-col items-center gap-1">
              <div className="bg-black/60 backdrop-blur px-5 py-2 rounded-full border border-yellow-400/30">
@@ -149,14 +144,13 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
         )}
       </div>
 
-      {/* Bottom Bar - Mobile Friendly HUD */}
+      {/* Bottom Bar */}
       <div className="w-full p-4 pointer-events-auto">
         <div className={`
             bg-black/70 backdrop-blur-xl border border-white/10 rounded-3xl 
             transition-all duration-300 ease-spring shadow-2xl
             ${isInstructionExpanded ? 'p-5' : 'p-3'}
         `}>
-          {/* Header / Toggle */}
           <div 
              className="flex justify-between items-center cursor-pointer"
              onClick={() => setIsInstructionExpanded(!isInstructionExpanded)}
@@ -172,7 +166,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
              </button>
           </div>
 
-          {/* Expanded Content */}
           {isInstructionExpanded && (
              <div className="mt-4 text-sm text-gray-200">
                 <div className="mb-4 leading-relaxed text-center font-medium">
@@ -186,9 +179,7 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                    )}
                 </div>
 
-                {/* Actions Grid */}
                 <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
-                    {/* Primary Action (Main Slot: Zoom or Status) */}
                     <div className="w-full">
                         {isDetecting ? (
                            <>
@@ -196,7 +187,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                                 <div className="w-full bg-white/5 border border-white/5 rounded-xl h-[48px] px-4 flex items-center gap-3">
                                    <ZoomOut className="w-4 h-4 text-white/50" />
                                    <div className="flex-1 relative h-6 flex items-center">
-                                       {/* Visual Ticks Track */}
                                        <div className="absolute inset-0 flex justify-between items-center px-1 pointer-events-none opacity-20">
                                            {Array.from({length: 11}).map((_, i) => (
                                                <div key={i} className={`w-[1px] bg-white ${i % 5 === 0 ? 'h-3' : 'h-1.5'}`}></div>
@@ -211,7 +201,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                                           onChange={(e) => onZoomChange && onZoomChange(parseFloat(e.target.value))}
                                           className="w-full h-full opacity-0 absolute z-20 cursor-pointer"
                                        />
-                                       {/* Custom Thumb/Track Visualization */}
                                        <div className="w-full h-0.5 bg-white/20 rounded-full relative z-10 overflow-visible">
                                            <div 
                                               className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-yellow-400 rounded-full shadow-[0_0_10px_rgba(250,204,21,0.5)] transition-all flex items-center justify-center"
@@ -220,7 +209,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                                                   transform: 'translate(-50%, -50%)'
                                               }}
                                            />
-                                            {/* Floating Label for Zoom Level */}
                                             <div 
                                               className="absolute top-[-25px] -translate-x-1/2 bg-yellow-400 text-black text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap"
                                               style={{ 
@@ -240,7 +228,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                              )}
                            </>
                         ) : (
-                           // Non-Detection Phase: Status or Gallery
                            <>
                             {gameState === GameState.SHOW_WINNER ? (
                                 <button 
@@ -259,7 +246,6 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
                         )}
                     </div>
 
-                    {/* Secondary Action (Right Slot: Start OR Reset) */}
                     {isDetecting ? (
                          <button 
                              onClick={onConfirmParticipants}
@@ -288,9 +274,8 @@ const GameOverlay: React.FC<GameOverlayProps> = ({
           )}
         </div>
       </div>
-
     </div>
   );
-};
+});
 
 export default GameOverlay;
