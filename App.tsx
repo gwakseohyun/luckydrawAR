@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CameraLayer from './components/CameraLayer';
 import GameOverlay from './components/GameOverlay';
 import { GameState, DetectedHand, CameraLayerHandle } from './types';
-import { X, RefreshCw, ZoomIn, Download } from 'lucide-react';
+import { X, RefreshCw, ZoomIn, Download, Maximize2 } from 'lucide-react';
 
 // Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
 interface GestureState {
@@ -364,21 +363,28 @@ const App: React.FC = () => {
         />
 
         {isGalleryOpen && (
-          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6">
-            <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-1 p-0 ${galleryImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2 md:grid-cols-3'}`}>
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/95 animate-fade-in p-6 safe-area-inset">
+            <div className={`w-full max-w-4xl max-h-[70vh] overflow-y-auto grid gap-3 p-1 ${galleryImages.length === 1 ? 'grid-cols-1 max-w-sm' : 'grid-cols-2 md:grid-cols-3'}`}>
                {galleryImages.map((src, idx) => (
                  <div 
                     key={idx} 
-                    className="relative aspect-video group cursor-pointer"
+                    className="relative cursor-pointer group rounded-xl overflow-hidden border border-white/10 bg-gray-900 shadow-xl"
                     onClick={() => setSelectedImage(src)}
                  >
                     <img 
                       src={src} 
                       alt={`Winner Moment ${idx + 1}`} 
-                      className="w-full h-full object-cover transition-opacity hover:opacity-90" 
+                      className="w-full h-auto object-contain" 
                     />
-                    <div className="absolute bottom-2 right-2 bg-black/50 px-2 py-0.5 text-white text-xs font-mono">
-                       #{idx + 1}
+                    
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 pt-8 flex items-end justify-between opacity-100">
+                       <div className="flex items-center gap-1.5 text-white/90">
+                          <Maximize2 className="w-3.5 h-3.5" />
+                          <span className="text-[11px] font-medium tracking-tight">크게 보기 / 저장</span>
+                       </div>
+                       <span className="text-white/40 text-[10px] font-mono border border-white/10 px-1.5 rounded">
+                          #{idx + 1}
+                       </span>
                     </div>
                  </div>
                ))}
@@ -388,7 +394,7 @@ const App: React.FC = () => {
                   </div>
                )}
             </div>
-            <div className="mt-8 w-full max-w-xs flex flex-col gap-3">
+            <div className="mt-6 w-full max-w-xs flex flex-col gap-3">
                  <button 
                    onClick={handleReset}
                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-yellow-400 hover:bg-yellow-500 text-black text-lg font-bold rounded-xl shadow-lg active:scale-95 whitespace-nowrap"
@@ -407,34 +413,34 @@ const App: React.FC = () => {
 
         {selectedImage && (
            <div 
-             className="absolute inset-0 z-50 bg-black flex items-center justify-center animate-fade-in"
+             className="absolute inset-0 z-50 bg-black flex items-center justify-center animate-fade-in safe-area-inset"
              onClick={() => setSelectedImage(null)}
            >
               <div className="relative w-full h-full flex items-center justify-center p-4">
                  <img 
                    src={selectedImage} 
                    alt="Full Screen" 
-                   className="max-w-full max-h-full object-contain"
+                   className="max-w-full max-h-full object-contain shadow-2xl"
                  />
-                 <div className="absolute top-4 right-4 flex gap-3">
+                 <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex gap-4">
                      <button 
-                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
+                       className="bg-white text-black px-6 py-3 rounded-full hover:bg-gray-200 transition-all font-bold flex items-center gap-2 shadow-lg active:scale-95"
                        onClick={(e) => {
                           e.stopPropagation();
                           const idx = galleryImages.indexOf(selectedImage);
                           downloadImage(selectedImage, idx !== -1 ? idx : 0);
                        }}
                      >
-                        <Download className="w-6 h-6" />
+                        <Download className="w-5 h-5" /> 저장하기
                      </button>
                      <button 
-                       className="bg-black/50 text-white p-3 rounded-full hover:bg-black/70 transition-colors backdrop-blur-md"
+                       className="bg-white/20 text-white px-6 py-3 rounded-full hover:bg-white/30 transition-all backdrop-blur-md font-bold flex items-center gap-2"
                        onClick={(e) => {
                           e.stopPropagation();
                           setSelectedImage(null);
                        }}
                      >
-                        <X className="w-6 h-6" />
+                        <X className="w-5 h-5" /> 닫기
                      </button>
                  </div>
               </div>
