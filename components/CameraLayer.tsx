@@ -191,31 +191,57 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         frameCounterRef.current++;
 
         if (video.readyState >= 2) {
-           if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
+           // Responsive Canvas Sizing
+           const dpr = Math.min(window.devicePixelRatio || 1, 2);
+           const displayWidth = Math.floor(window.innerWidth * dpr);
+           const displayHeight = Math.floor(window.innerHeight * dpr);
+
+           if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+              canvas.width = displayWidth;
+              canvas.height = displayHeight;
            }
 
            const zoom = zoomStateRef.current;
+           const vw = video.videoWidth;
+           const vh = video.videoHeight;
+           const cw = canvas.width;
+           const ch = canvas.height;
+
+           // Calculate "Cover" Crop to fill the screen
+           const videoRatio = vw / vh;
+           const canvasRatio = cw / ch;
+           
+           let sWidth, sHeight, sx, sy;
+
+           if (canvasRatio > videoRatio) {
+               // Canvas is wider relative to height (e.g. landscape canvas, portrait video)
+               // Match Width, Crop Height
+               sWidth = vw;
+               sHeight = vw / canvasRatio;
+           } else {
+               // Canvas is taller relative to width (e.g. portrait canvas, landscape video)
+               // Match Height, Crop Width
+               sHeight = vh;
+               sWidth = vh * canvasRatio;
+           }
+
+           // Apply Digital Zoom
+           const zoomLevel = zoom.type === 'digital' ? Math.max(1, zoom.current) : 1;
+           sWidth /= zoomLevel;
+           sHeight /= zoomLevel;
+
+           // Center the crop
+           sx = (vw - sWidth) / 2;
+           sy = (vh - sHeight) / 2;
+
            ctx.save();
            if (facingMode === 'user') {
              ctx.translate(canvas.width, 0);
              ctx.scale(-1, 1);
            }
 
-           if (zoom.type === 'native') {
-               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-           } else {
-               const z = zoom.current;
-               const safeZ = Math.max(1, z);
-               const vw = video.videoWidth;
-               const vh = video.videoHeight;
-               const cropW = vw / safeZ;
-               const cropH = vh / safeZ;
-               const cropX = (vw - cropW) / 2;
-               const cropY = (vh - cropH) / 2;
-               ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
-           }
+           // Draw the cropped/zoomed video to fill canvas
+           ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, cw, ch);
            ctx.restore();
         }
 
@@ -319,7 +345,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
           });
 
           hands.setOptions({
-             maxNumHands: 4, 
+             maxNumHands: 20, // Increased to 20 to support larger groups
              modelComplexity: 0, 
              minDetectionConfidence: 0.7, 
              minTrackingConfidence: 0.6
