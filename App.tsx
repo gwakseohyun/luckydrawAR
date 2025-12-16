@@ -176,8 +176,9 @@ const App: React.FC = () => {
 
       detectedHands.forEach((hand) => {
         // --- STABILITY CHECK ---
-        // Prevents noise from rapidly toggling states.
-        // We only trust the 'facing' if it has been consistent for STABILITY_THRESHOLD ms.
+        // Reduced threshold to 60ms to catch faster flips
+        const STABILITY_THRESHOLD = 60; // ms
+        
         let history = handFacingHistory.current.get(hand.stableId);
         
         if (!history || history.facing !== hand.facing) {
@@ -186,7 +187,6 @@ const App: React.FC = () => {
             return; // Wait for stability
         }
 
-        const STABILITY_THRESHOLD = 150; // ms
         if (now - history.since < STABILITY_THRESHOLD) {
             return; // Not stable enough yet
         }
@@ -203,6 +203,9 @@ const App: React.FC = () => {
 
         let nextStep = gState.step;
 
+        // Sequence: Palm -> Back -> Palm -> Back (Trigger)
+        // Note: Users might start showing Back, which won't trigger step 1.
+        // We enforce starting with Palm to ensure intent.
         if (gState.step === 0) {
           if (stableFacing === 'Palm') nextStep = 1;
         } else if (gState.step === 1) { 
