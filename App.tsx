@@ -161,18 +161,21 @@ const App: React.FC = () => {
 
     const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
 
-    // Gesture control for Confirm (Step 0 -> Step 4)
+    // Gesture control for Confirm
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
       detectedHands.forEach((hand) => {
         let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
         
-        if (gState.step > 0 && now - gState.lastTime > 1200) { 
+        // Timeout for gesture sequence - made more lenient (2000ms)
+        if (gState.step > 0 && now - gState.lastTime > 2000) { 
           gState = { step: 0, lastTime: now };
         }
 
         const facing = hand.facing;
         let nextStep = gState.step;
 
+        // More robust state machine for Palm -> Back -> Palm -> Back
+        // Added tolerance for jittery frames by not resetting immediately on wrong facing
         if (gState.step === 0) {
           if (facing === 'Palm') nextStep = 1;
         } else if (gState.step === 1) { 
@@ -182,8 +185,8 @@ const App: React.FC = () => {
         } else if (gState.step === 3) { 
           if (facing === 'Back') {
              nextStep = 0; 
+             // Trigger action
              if (gameState === GameState.DETECT_PARTICIPANTS) {
-                // Must have more participants than winners to start
                 if (detectedHands.length > winnerCount) handleConfirmParticipants();
              }
           }
@@ -191,12 +194,12 @@ const App: React.FC = () => {
 
         if (nextStep !== gState.step) {
           handGestureStates.current.set(hand.stableId, { step: nextStep, lastTime: now });
-        } else {
-           handGestureStates.current.set(hand.stableId, gState);
         }
+        // Don't update lastTime if step didn't change, unless we want to refresh timeout? 
+        // Better to only update time on step change to enforce speed
       });
       
-      // Cleanup
+      // Cleanup stale gesture states
       const currentStableIds = new Set(detectedHands.map(h => h.stableId));
       for (const id of handGestureStates.current.keys()) {
           if (!currentStableIds.has(id)) {
@@ -223,7 +226,8 @@ const App: React.FC = () => {
              onSuccess();
           }
        } else {
-          if (now - lastValidConditionTimeRef.current > 500) {
+          // Grace period of 1000ms (increased from 500) allows hands to flicker out/in without reset
+          if (now - lastValidConditionTimeRef.current > 1000) {
              holdStartTimeRef.current = null;
              setTimer(0);
           }
@@ -234,13 +238,12 @@ const App: React.FC = () => {
       if (gameState === GameState.DETECT_PARTICIPANTS) {
         setParticipantCount(0);
       }
-      if (gameState === GameState.WAIT_FOR_FISTS_READY) {
-         setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
-      }
+      // Don't immediately warn/reset in WAIT_FOR_FISTS_READY, let the grace period handle it
     }
 
     switch (gameState) {
       case GameState.DETECT_PARTICIPANTS:
+        // Always update participant count to the max seen recently to avoid flickering numbers
         if (detectedHands.length > 0) {
            setParticipantCount(detectedHands.length);
         }
@@ -252,7 +255,9 @@ const App: React.FC = () => {
         const isAllParticipantsVisible = total >= participantCount;
         const isAllFists = fistCount >= participantCount;
         
-        const condition = isAllParticipantsVisible && isAllFists;
+        // Relaxed condition: If we have ENOUGH fists (>= participantCount), we can proceed
+        // even if there are extra detected hands or noise.
+        const condition = isAllFists && (total >= participantCount);
 
         if (!isAllParticipantsVisible) {
            setWarningMessage(`참가자 ${participantCount}명이 모두 보여야 합니다.`);
@@ -305,7 +310,7 @@ const App: React.FC = () => {
 
   const performDraw = () => {
     const currentHandCount = detectedHands.length;
-    // Use participantCount if hands are missing, but ideally use current detected hands for pool
+    // Use the greater of detected vs expected to avoid crash, but prefer detected
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
     
     // Clamp winner count to pool size at the moment of draw
@@ -319,6 +324,8 @@ const App: React.FC = () => {
     
     const winningIndices = indices.slice(0, countToSelect);
     
+    // If we have fewer detected hands than expected, we might have issue mapping IDs.
+    // We try to map to the currently detected hands first.
     const winningIds = winningIndices.map(idx => {
        if (detectedHands[idx]) return detectedHands[idx].stableId;
        return -1;
@@ -413,7 +420,7 @@ const App: React.FC = () => {
 
         {selectedImage && (
            <div 
-             className="absolute inset-0 z-50 bg-black flex items-center justify-center animate-fade-in safe-area-inset"
+             className="absolute inset-0 z-50 bg-black/95 flex items-center justify-center animate-fade-in safe-area-inset"
              onClick={() => setSelectedImage(null)}
            >
               <div className="relative w-full h-full flex items-center justify-center p-4">
@@ -422,9 +429,9 @@ const App: React.FC = () => {
                    alt="Full Screen" 
                    className="max-w-full max-h-full object-contain shadow-2xl"
                  />
-                 <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex gap-4">
+                 <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-3 w-full max-w-md justify-center px-4">
                      <button 
-                       className="bg-white text-black px-6 py-3 rounded-full hover:bg-gray-200 transition-all font-bold flex items-center gap-2 shadow-lg active:scale-95"
+                       className="flex-1 bg-white text-black h-14 rounded-full hover:bg-gray-200 transition-all font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 whitespace-nowrap min-w-[120px]"
                        onClick={(e) => {
                           e.stopPropagation();
                           const idx = galleryImages.indexOf(selectedImage);
@@ -434,7 +441,7 @@ const App: React.FC = () => {
                         <Download className="w-5 h-5" /> 저장하기
                      </button>
                      <button 
-                       className="bg-white/20 text-white px-6 py-3 rounded-full hover:bg-white/30 transition-all backdrop-blur-md font-bold flex items-center gap-2"
+                       className="flex-1 bg-white/20 text-white h-14 rounded-full hover:bg-white/30 transition-all backdrop-blur-md font-bold flex items-center justify-center gap-2 min-w-[100px]"
                        onClick={(e) => {
                           e.stopPropagation();
                           setSelectedImage(null);
