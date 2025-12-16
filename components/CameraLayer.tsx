@@ -30,17 +30,17 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // --- Advanced Tracking Configuration ---
-const MAX_TRACKING_DISTANCE = 0.4; // Increased allowance for fast movement
-const DUPLICATE_HAND_THRESHOLD = 0.05; // Tightened threshold (5% of screen) to prevent merging adjacent hands
+const MAX_TRACKING_DISTANCE = 0.5; // Very generous to prevent ID switching on fast motion
+const DUPLICATE_HAND_THRESHOLD = 0.08; // Balanced: 8% of screen. Too low = split hands, Too high = merged neighbors.
 const FRAME_PERSISTENCE_THRESHOLD = 1; 
-const MAX_MISSING_FRAMES = 30; // Increased to keep ID alive longer (approx 1 sec at 30fps)
+const MAX_MISSING_FRAMES = 45; // 1.5 seconds persistence for ID logic
 
 // Visual Smoothing
 const POS_SMOOTHING_FACTOR = 0.5; 
-const FIST_CONFIDENCE_THRESHOLD = 0.6; 
-const FIST_CONFIDENCE_DECAY = 0.25; 
+const FIST_CONFIDENCE_THRESHOLD = 0.5; // Lower threshold for easier visual feedback
+const FIST_CONFIDENCE_DECAY = 0.2; 
 
-const GAME_LOGIC_UPDATE_INTERVAL_MS = 30; // Faster updates
+const GAME_LOGIC_UPDATE_INTERVAL_MS = 30; 
 
 let nextStableId = 1000; 
 
@@ -247,7 +247,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         const visualMap = visualStateMapRef.current;
         const now = Date.now();
 
-        // Detect current hands
+        // Update Visual States from Detected Hands
         hands.forEach((hand, idx) => {
            let vState = visualMap.get(hand.stableId);
            const targetX = hand.centroid.x * canvas.width;
@@ -282,9 +282,8 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         });
 
         // ----------------------------------------------------------------------
-        // FIX: Persistent Winner Ghost Logic
-        // If we are in SHOW_WINNER state, we check for any winning ID that isn't currently detected.
-        // We draw the winner ball at its last known location forever (until reset).
+        // PERSISTENT GHOST LOGIC
+        // Draw winning balls for IDs that are NOT currently detected.
         // ----------------------------------------------------------------------
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
@@ -292,8 +291,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
                     if (vState) {
-                        // REMOVED TIME CHECK: if (now - vState.lastSeen < 1500)
-                        // Always draw ghost for winner
+                        // Draw ghost. Pass isGhost=true but handle opacity in the function.
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -302,10 +300,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup Logic: Don't remove Winning IDs from visual map
+        // Cleanup Logic
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
-                // If it's a winner, don't expire it from memory
+                // CRITICAL: Never remove a winner's visual state from memory
                 if (currentWinningIds.includes(id)) continue;
                 
                 if (now - state.lastSeen > 5000) {
@@ -355,7 +353,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
           hands.setOptions({
              maxNumHands: 20, 
              modelComplexity: 1, 
-             minDetectionConfidence: 0.5, // Lowered slightly to improve recall
+             minDetectionConfidence: 0.5, 
              minTrackingConfidence: 0.5
           });
 
@@ -410,9 +408,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  uniqueInputs.forEach((input, inputIdx) => {
                      const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
                      
-                     // FIX: Reduced handedness penalty dramatically.
-                     // Fists often have unstable handedness in MediaPipe. 
-                     // Position is the primary truth.
                      const handednessPenalty = (track.label !== input.label) ? 0.05 : 0; 
                      
                      if (dist < MAX_TRACKING_DISTANCE) {
@@ -621,7 +616,8 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, min
   const radius = minDimension * 0.15;
   const fontSize = Math.max(16, minDimension * 0.05); 
   
-  ctx.globalAlpha = isGhost ? 0.6 : 1.0;
+  // Removed Opacity reduction for Ghost to make it persistent and visible
+  ctx.globalAlpha = 1.0; 
 
   const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 1.5);
   gradient.addColorStop(0, 'rgba(255, 234, 0, 0.9)');
@@ -636,8 +632,19 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, min
   ctx.arc(x, y, radius, 0, 2 * Math.PI);
   ctx.fill();
   
+  // Added extra pulse ring for ghost to show it's "remembered"
+  if (isGhost) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = Math.max(1, minDimension * 0.005);
+      ctx.beginPath();
+      ctx.arc(x, y, radius * 1.2, 0, 2 * Math.PI);
+      ctx.stroke();
+  }
+
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = Math.max(2, minDimension * 0.01);
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, 2 * Math.PI);
   ctx.stroke();
   
   ctx.fillStyle = '#000000';
