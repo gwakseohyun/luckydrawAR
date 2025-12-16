@@ -39,6 +39,7 @@ const App: React.FC = () => {
 
   // Gesture Tracking Refs
   const handGestureStates = useRef<Map<number, GestureState>>(new Map());
+  const handFacingHistory = useRef<Map<number, { facing: 'Palm' | 'Back', since: number }>>(new Map());
   const lastStateChangeTimeRef = useRef<number>(Date.now());
   const participantCountRef = useRef(participantCount);
   
@@ -79,6 +80,7 @@ const App: React.FC = () => {
     setSelectedImage(null);
     setShouldCapture(false);
     handGestureStates.current.clear();
+    handFacingHistory.current.clear();
     captureTimeoutsRef.current.forEach(t => clearTimeout(t));
     captureTimeoutsRef.current.clear();
   }, [changeState]);
@@ -163,27 +165,52 @@ const App: React.FC = () => {
 
     // Gesture control for Confirm
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
+      // 1. Cleanup Stale Histories
+      const currentStableIds = new Set(detectedHands.map(h => h.stableId));
+      for (const id of handFacingHistory.current.keys()) {
+          if (!currentStableIds.has(id)) {
+              handFacingHistory.current.delete(id);
+              handGestureStates.current.delete(id);
+          }
+      }
+
       detectedHands.forEach((hand) => {
+        // --- STABILITY CHECK ---
+        // Prevents noise from rapidly toggling states.
+        // We only trust the 'facing' if it has been consistent for STABILITY_THRESHOLD ms.
+        let history = handFacingHistory.current.get(hand.stableId);
+        
+        if (!history || history.facing !== hand.facing) {
+            // State changed or new hand, reset timer
+            handFacingHistory.current.set(hand.stableId, { facing: hand.facing, since: now });
+            return; // Wait for stability
+        }
+
+        const STABILITY_THRESHOLD = 150; // ms
+        if (now - history.since < STABILITY_THRESHOLD) {
+            return; // Not stable enough yet
+        }
+
+        // --- GESTURE LOGIC ---
+        // Only use the stable facing value
+        const stableFacing = history.facing;
         let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
         
-        // Timeout for gesture sequence - made more lenient (2000ms)
+        // Timeout for gesture sequence (2000ms)
         if (gState.step > 0 && now - gState.lastTime > 2000) { 
           gState = { step: 0, lastTime: now };
         }
 
-        const facing = hand.facing;
         let nextStep = gState.step;
 
-        // More robust state machine for Palm -> Back -> Palm -> Back
-        // Added tolerance for jittery frames by not resetting immediately on wrong facing
         if (gState.step === 0) {
-          if (facing === 'Palm') nextStep = 1;
+          if (stableFacing === 'Palm') nextStep = 1;
         } else if (gState.step === 1) { 
-          if (facing === 'Back') nextStep = 2; 
+          if (stableFacing === 'Back') nextStep = 2; 
         } else if (gState.step === 2) { 
-          if (facing === 'Palm') nextStep = 3;
+          if (stableFacing === 'Palm') nextStep = 3;
         } else if (gState.step === 3) { 
-          if (facing === 'Back') {
+          if (stableFacing === 'Back') {
              nextStep = 0; 
              // Trigger action
              if (gameState === GameState.DETECT_PARTICIPANTS) {
@@ -195,17 +222,7 @@ const App: React.FC = () => {
         if (nextStep !== gState.step) {
           handGestureStates.current.set(hand.stableId, { step: nextStep, lastTime: now });
         }
-        // Don't update lastTime if step didn't change, unless we want to refresh timeout? 
-        // Better to only update time on step change to enforce speed
       });
-      
-      // Cleanup stale gesture states
-      const currentStableIds = new Set(detectedHands.map(h => h.stableId));
-      for (const id of handGestureStates.current.keys()) {
-          if (!currentStableIds.has(id)) {
-              handGestureStates.current.delete(id);
-          }
-      }
     }
 
     if (isGalleryOpen || selectedImage) return;
@@ -226,7 +243,7 @@ const App: React.FC = () => {
              onSuccess();
           }
        } else {
-          // Grace period of 1000ms (increased from 500) allows hands to flicker out/in without reset
+          // Grace period of 1000ms
           if (now - lastValidConditionTimeRef.current > 1000) {
              holdStartTimeRef.current = null;
              setTimer(0);
@@ -238,12 +255,10 @@ const App: React.FC = () => {
       if (gameState === GameState.DETECT_PARTICIPANTS) {
         setParticipantCount(0);
       }
-      // Don't immediately warn/reset in WAIT_FOR_FISTS_READY, let the grace period handle it
     }
 
     switch (gameState) {
       case GameState.DETECT_PARTICIPANTS:
-        // Always update participant count to the max seen recently to avoid flickering numbers
         if (detectedHands.length > 0) {
            setParticipantCount(detectedHands.length);
         }
@@ -255,8 +270,6 @@ const App: React.FC = () => {
         const isAllParticipantsVisible = total >= participantCount;
         const isAllFists = fistCount >= participantCount;
         
-        // Relaxed condition: If we have ENOUGH fists (>= participantCount), we can proceed
-        // even if there are extra detected hands or noise.
         const condition = isAllFists && (total >= participantCount);
 
         if (!isAllParticipantsVisible) {
@@ -310,10 +323,7 @@ const App: React.FC = () => {
 
   const performDraw = () => {
     const currentHandCount = detectedHands.length;
-    // Use the greater of detected vs expected to avoid crash, but prefer detected
     const poolSize = currentHandCount > 0 ? currentHandCount : participantCount;
-    
-    // Clamp winner count to pool size at the moment of draw
     const countToSelect = Math.min(winnerCount, poolSize);
     
     const indices = Array.from({ length: poolSize }, (_, i) => i);
@@ -324,8 +334,6 @@ const App: React.FC = () => {
     
     const winningIndices = indices.slice(0, countToSelect);
     
-    // If we have fewer detected hands than expected, we might have issue mapping IDs.
-    // We try to map to the currently detected hands first.
     const winningIds = winningIndices.map(idx => {
        if (detectedHands[idx]) return detectedHands[idx].stableId;
        return -1;
