@@ -1,4 +1,3 @@
-
 import { HandLandmark, DetectedHand } from "../types";
 
 // MediaPipe Hands Landmark Indices
@@ -35,9 +34,10 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
   const v2y = pinkyMcp.y - wrist.y;
   const crossZ = v1x * v2y - v1y * v2x;
 
+  // Refined threshold for facing detection to prevent jitter
   const facing: 'Palm' | 'Back' = handednessLabel === 'Right' 
-    ? (crossZ < 0 ? 'Palm' : 'Back') 
-    : (crossZ > 0 ? 'Palm' : 'Back');
+    ? (crossZ < -0.0001 ? 'Palm' : 'Back') 
+    : (crossZ > 0.0001 ? 'Palm' : 'Back');
 
   // --- 2. Count Fingers (Index to Pinky) ---
   let fingersUp = 0;
