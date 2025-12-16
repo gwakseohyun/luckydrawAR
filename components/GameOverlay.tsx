@@ -187,48 +187,50 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
         )}
       </div>
 
-      {/* Bottom Bar */}
-      <div className="w-full p-4 pb-24 md:pb-6 pointer-events-auto">
+      {/* Bottom Bar (Docked Bottom Sheet) */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-auto">
         <div className={`
-            bg-black/70 backdrop-blur-xl border border-white/10 rounded-3xl 
-            transition-all duration-300 ease-spring shadow-2xl
-            ${isInstructionExpanded ? 'p-5' : 'p-3'}
+            bg-gray-900/90 backdrop-blur-xl border-t border-white/10 
+            rounded-t-3xl transition-all duration-300 ease-spring shadow-[0_-10px_40px_rgba(0,0,0,0.5)]
+            pb-[calc(env(safe-area-inset-bottom)+1.5rem)]
         `}>
+          {/* Toggle Header */}
           <div 
-             className="flex justify-between items-center cursor-pointer"
+             className="flex justify-between items-center p-5 cursor-pointer"
              onClick={() => setIsInstructionExpanded(!isInstructionExpanded)}
           >
              <div className="flex items-center gap-2 text-white">
-                <Info className="w-4 h-4 text-yellow-400" />
-                <span className="font-bold text-sm">
+                <Info className="w-5 h-5 text-yellow-400" />
+                <span className="font-bold text-base">
                    진행 안내
                 </span>
              </div>
-             <button className="text-white/50 hover:text-white">
-                {isInstructionExpanded ? <ChevronDown className="w-4 h-4"/> : <ChevronUp className="w-4 h-4"/>}
+             <button className="text-white/50 hover:text-white p-1">
+                {isInstructionExpanded ? <ChevronDown className="w-5 h-5"/> : <ChevronUp className="w-5 h-5"/>}
              </button>
           </div>
 
+          {/* Content */}
           {isInstructionExpanded && (
-             <div className="mt-4 text-sm text-gray-200">
-                <div className="mb-4 leading-relaxed text-center font-medium">
+             <div className="px-5 pb-2 animate-fade-in">
+                <div className="mb-6 leading-relaxed text-center font-medium text-gray-200">
                    {isDetecting ? (
-                       <>
-                         <p>카메라에 손바닥을 보여주세요.</p>
-                         <p className="text-white/70 text-xs mt-1">2명 이상 모이면 게임을 시작할 수 있습니다.</p>
-                       </>
+                       <div className="flex flex-col gap-1">
+                         <p className="text-lg">카메라에 손바닥을 보여주세요.</p>
+                         <p className="text-white/50 text-sm">2명 이상 모이면 게임을 시작할 수 있습니다.</p>
+                       </div>
                    ) : (
-                       <p>{INSTRUCTIONS[gameState]}</p>
+                       <p className="text-lg">{INSTRUCTIONS[gameState]}</p>
                    )}
                 </div>
 
-                <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
+                <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
                     <div className="w-full">
                         {isDetecting ? (
                            <>
                              {zoomCapabilities ? (
-                                <div className="w-full bg-white/5 border border-white/5 rounded-xl h-[48px] px-4 flex items-center gap-3">
-                                   <ZoomOut className="w-4 h-4 text-white/50" />
+                                <div className="w-full bg-white/5 border border-white/5 rounded-2xl h-[56px] px-4 flex items-center gap-3">
+                                   <ZoomOut className="w-5 h-5 text-white/50" />
                                    <div className="flex-1 relative h-6 flex items-center">
                                        <div className="absolute inset-0 flex justify-between items-center px-1 pointer-events-none opacity-20">
                                            {Array.from({length: 11}).map((_, i) => (
@@ -262,10 +264,10 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                                             </div>
                                        </div>
                                    </div>
-                                   <ZoomIn className="w-4 h-4 text-white/50" />
+                                   <ZoomIn className="w-5 h-5 text-white/50" />
                                 </div>
                              ) : (
-                                <div className="w-full bg-white/5 text-white/30 font-bold py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                                <div className="w-full bg-white/5 text-white/30 font-bold py-4 rounded-2xl border border-white/5 flex items-center justify-center text-sm">
                                     {canStart ? "시작 버튼을 눌러주세요" : "인원 모으는 중..."}
                                 </div>
                              )}
@@ -275,13 +277,13 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                             {gameState === GameState.SHOW_WINNER ? (
                                 <button 
                                     onClick={onOpenGallery}
-                                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-3 rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                                    className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
                                 >
-                                    <ImageIcon className="w-4 h-4" /> 결과 보기 
-                                    {galleryCount > 0 && <span className="bg-red-600 text-white text-[10px] px-1.5 rounded-full">{galleryCount}</span>}
+                                    <ImageIcon className="w-5 h-5" /> 결과 보기 
+                                    {galleryCount > 0 && <span className="bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-bold">{galleryCount}</span>}
                                 </button>
                             ) : (
-                               <div className="w-full bg-white/5 text-white/50 py-3 rounded-xl border border-white/5 flex items-center justify-center text-xs">
+                               <div className="w-full bg-white/5 text-white/50 py-4 rounded-2xl border border-white/5 flex items-center justify-center text-sm">
                                   제스처를 인식하고 있습니다...
                                </div>
                             )}
@@ -294,22 +296,22 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                              onClick={onConfirmParticipants}
                              disabled={!canStart}
                              className={`
-                                h-full px-5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all min-w-[70px] py-2
+                                h-[56px] px-6 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all min-w-[80px]
                                 ${canStart 
                                    ? 'bg-yellow-400 border-yellow-400 text-black shadow-[0_0_15px_rgba(250,204,21,0.4)] hover:bg-yellow-300 active:scale-95' 
                                    : 'bg-white/5 border-white/5 text-white/20 cursor-not-allowed'}
                              `}
                          >
-                             <Play className={`w-4 h-4 mt-0.5 ${canStart ? 'fill-black' : ''}`} />
-                             <span className="text-[10px] whitespace-nowrap font-bold">시작</span>
+                             <Play className={`w-5 h-5 ${canStart ? 'fill-black' : ''}`} />
+                             <span className="text-xs whitespace-nowrap font-bold">시작</span>
                          </button>
                     ) : (
                         <button 
                             onClick={onReset}
-                            className="h-full px-5 bg-white/10 hover:bg-white/20 text-white rounded-xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[70px] py-2"
+                            className="h-[56px] px-6 bg-white/10 hover:bg-white/20 text-white rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all min-w-[80px]"
                         >
-                            <RefreshCw className="w-4 h-4 mt-0.5" />
-                            <span className="text-[10px] whitespace-nowrap">다시 시작</span>
+                            <RefreshCw className="w-5 h-5" />
+                            <span className="text-xs whitespace-nowrap">다시 시작</span>
                         </button>
                     )}
                 </div>
