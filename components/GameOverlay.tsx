@@ -1,4 +1,4 @@
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useEffect } from 'react';
 import { GameState } from '../types';
 import { INSTRUCTIONS, COLORS } from '../constants';
 import { RefreshCw, Info, AlertTriangle, Image as ImageIcon, SwitchCamera, ChevronDown, ChevronUp, ZoomIn, ZoomOut, Play, Minus, Plus } from 'lucide-react';
@@ -71,6 +71,12 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
   onUpdateWinnerCount
 }) => {
   const [isInstructionExpanded, setIsInstructionExpanded] = useState(true);
+
+  useEffect(() => {
+    if (gameState === GameState.SHOW_WINNER) {
+      setIsInstructionExpanded(true);
+    }
+  }, [gameState]);
 
   const isHolding = gameState === GameState.WAIT_FOR_FISTS_READY;
   const isDetecting = gameState === GameState.DETECT_PARTICIPANTS;
