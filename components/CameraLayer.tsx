@@ -32,7 +32,7 @@ const lerp = (start: number, end: number, t: number) => {
 
 // Tracking Configuration
 const MAX_TRACKING_DISTANCE = 0.25; 
-const DUPLICATE_HAND_THRESHOLD = 0.15; // 15% of screen. If hands are closer than this, treat as duplicate.
+const DUPLICATE_HAND_THRESHOLD = 0.15; 
 const FRAME_PERSISTENCE_THRESHOLD = 2; 
 const MAX_MISSING_FRAMES = 30; 
 
@@ -41,7 +41,6 @@ const POS_SMOOTHING_FACTOR = 0.4;
 const FIST_CONFIDENCE_THRESHOLD = 0.6; 
 const FIST_CONFIDENCE_DECAY = 0.25; 
 
-// Performance Config
 const GAME_LOGIC_UPDATE_INTERVAL_MS = 60; 
 
 let nextStableId = 0;
@@ -142,7 +141,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) return;
 
-      // 1. Camera Setup
       try {
         if (video.srcObject) {
           const stream = video.srcObject as MediaStream;
@@ -189,7 +187,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         return;
       }
 
-      // 2. Render Loop (Runs at Animation Frame Rate - 60fps)
       const render = () => {
         if (isCancelled) return;
         frameCounterRef.current++;
@@ -223,14 +220,12 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            ctx.restore();
         }
 
-        // --- Draw AR Overlays ---
         const hands = detectedHandsRef.current;
         const currentGameState = gameStateRef.current;
         const currentWinningIds = winningIdsRef.current;
         const visualMap = visualStateMapRef.current;
         const now = Date.now();
 
-        // 1. Update Visual State for detected hands
         hands.forEach((hand, idx) => {
            let vState = visualMap.get(hand.stableId);
            const targetX = hand.centroid.x * canvas.width;
@@ -245,16 +240,13 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                   isVisuallyFist: hand.isFist
               };
            } else {
-              // Smooth Position
               vState.x = lerp(vState.x, targetX, POS_SMOOTHING_FACTOR);
               vState.y = lerp(vState.y, targetY, POS_SMOOTHING_FACTOR);
               vState.lastSeen = now;
 
-              // Smooth Fist State (Debounce)
               const targetConf = hand.isFist ? 1.0 : 0.0;
               vState.fistConfidence = lerp(vState.fistConfidence, targetConf, FIST_CONFIDENCE_DECAY);
               
-              // Hysteresis
               if (vState.isVisuallyFist && vState.fistConfidence < (1 - FIST_CONFIDENCE_THRESHOLD)) {
                   vState.isVisuallyFist = false;
               } else if (!vState.isVisuallyFist && vState.fistConfidence > FIST_CONFIDENCE_THRESHOLD) {
@@ -263,19 +255,15 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            }
            visualMap.set(hand.stableId, vState);
 
-           // Draw
            const isWinner = currentWinningIds.includes(hand.stableId);
            drawHandOverlay(ctx, vState.x, vState.y, hand, currentGameState, idx, isWinner, vState.isVisuallyFist);
         });
 
-        // 2. Handle "Ghost" Winners
-        // Only draw ghost if the winner ID is NOT currently detected
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    // Fade out ghost over 1 second, but keep memory longer
                     if (vState && (now - vState.lastSeen < 1000)) {
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
@@ -285,17 +273,14 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup: Run only once every 60 frames
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
-                // Keep visual state longer (5s) to allow for re-entry recovery
                 if (now - state.lastSeen > 5000) {
                     visualMap.delete(id);
                 }
             }
         }
 
-        // Capture Logic
         if (triggerCaptureRef.current) {
            try {
               const tempCanvas = document.createElement('canvas');
@@ -316,7 +301,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       renderReqRef.current = requestAnimationFrame(render);
 
-      // 3. AI Model Setup
       if (!handsRef.current) { 
           if (!window.Hands) {
              let attempts = 0;
@@ -348,7 +332,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
 
              const now = Date.now();
              
-             // --- STEP 0: Pre-process inputs (Centroid Calculation) ---
              const allInputs: {x: number, y: number, index: number}[] = [];
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks, i) => {
@@ -356,8 +339,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 });
              }
 
-             // --- STEP 1: NMS (Non-Maximum Suppression) for Duplicate Hands ---
-             // Filter out hands that are physically too close to each other (Ghost duplicates)
              const uniqueInputs: typeof allInputs = [];
              const skippedIndices = new Set<number>();
 
@@ -372,17 +353,14 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                      const dist = Math.sqrt((handA.x - handB.x)**2 + (handA.y - handB.y)**2);
                      
                      if (dist < DUPLICATE_HAND_THRESHOLD) {
-                         // Overlap detected! Ignore handB (arbitrarily keep first one)
                          skippedIndices.add(j);
                      }
                  }
              }
 
-             // From here on, use `uniqueInputs` instead of `allInputs`
              const activeTracks = tracksRef.current;
              activeTracks.forEach(t => t.missingCount++);
 
-             // --- STEP 2: Standard Tracking (Greedy Match) ---
              const matches: {trackIdx: number, inputIdx: number, dist: number}[] = [];
              activeTracks.forEach((track, trackIdx) => {
                  uniqueInputs.forEach((input, inputIdx) => {
@@ -414,10 +392,8 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  matchedInputIndices.add(inputIdx);
              });
 
-             // --- STEP 3: Absolute Winner Recovery (The Fix for Disappearing Balls) ---
              const unmatchedInputIndices = uniqueInputs.map((_, i) => i).filter(i => !matchedInputIndices.has(i));
              
-             // If we are in SHOW_WINNER state, we must ensure all Winning IDs are assigned if possible.
              if (gameStateRef.current === GameState.SHOW_WINNER && unmatchedInputIndices.length > 0) {
                  const currentActiveWinnerIds = activeTracks
                     .filter((t, i) => matchedTrackIndices.has(i) && winningIdsRef.current.includes(t.id))
@@ -426,29 +402,18 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  const missingWinnerIds = winningIdsRef.current.filter(id => !currentActiveWinnerIds.includes(id));
 
                  if (missingWinnerIds.length > 0) {
-                     // We have unmatched inputs (new hands) and missing winners.
-                     // Force assign them!
-                     
-                     // Simple strategy: Assign first missing winner to first unmatched input.
-                     // A better strategy (optional): Check last known position. But the user said "moves fast", 
-                     // so spatial locality might be broken. Priority is "Existence" over "Position".
-                     
-                     let recoveredCount = 0;
                      const inputsToRecover = [...unmatchedInputIndices];
-                     
                      missingWinnerIds.forEach(missingId => {
                          if (inputsToRecover.length === 0) return;
                          
-                         // Try to find the closest unmatched input to the last known position of this winner
                          const lastVis = visualStateMapRef.current.get(missingId);
                          let bestInputIdx = -1;
                          let bestDist = Infinity;
                          
-                         // Helper: normalized dist
                          const width = canvasRef.current?.width || 1;
                          const height = canvasRef.current?.height || 1;
                          
-                         inputsToRecover.forEach((uIdx, arrayIdx) => {
+                         inputsToRecover.forEach((uIdx) => {
                              const input = uniqueInputs[uIdx];
                              let dist = 0;
                              if (lastVis) {
@@ -456,8 +421,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                                  const normY = lastVis.y / height;
                                  dist = Math.sqrt((normX - input.x)**2 + (normY - input.y)**2);
                              }
-                             // If no lastVis, dist is 0 (first come first serve)
-                             
                              if (dist < bestDist) {
                                  bestDist = dist;
                                  bestInputIdx = uIdx;
@@ -465,31 +428,25 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                          });
 
                          if (bestInputIdx !== -1) {
-                             // RECOVER THE WINNER
                              const input = uniqueInputs[bestInputIdx];
-                             
-                             // Remove from unmatched list
                              const removeIdx = inputsToRecover.indexOf(bestInputIdx);
                              inputsToRecover.splice(removeIdx, 1);
                              matchedInputIndices.add(bestInputIdx);
                              
-                             // Resurrect track
                              activeTracks.push({
                                  id: missingId,
                                  centroid: {x: input.x, y: input.y},
                                  lastSeen: now,
-                                 frameCount: FRAME_PERSISTENCE_THRESHOLD + 1, // Instant lock
+                                 frameCount: FRAME_PERSISTENCE_THRESHOLD + 1,
                                  missingCount: 0,
                                  // @ts-ignore
                                  _tempMpIndex: input.index 
                              });
-                             recoveredCount++;
                          }
                      });
                  }
              }
 
-             // --- STEP 4: New Tracks for remaining inputs ---
              uniqueInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
                      activeTracks.push({
@@ -504,7 +461,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  }
              });
 
-             // Filter & Process
              let validTracks = activeTracks.filter(t => t.missingCount < MAX_MISSING_FRAMES);
              tracksRef.current = validTracks;
 
@@ -525,13 +481,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  }
              });
 
-             // Sort
              finalHands.sort((a, b) => a.centroid.x - b.centroid.x);
              
-             // Update Internal Ref for Render Loop (AR is always 60fps)
              detectedHandsRef.current = finalHands;
 
-             // --- OPTIMIZATION: Throttle React Updates ---
              const shouldUpdate = 
                  finalHands.length !== lastHandCountRef.current || 
                  (now - lastLogicUpdateTimeRef.current > GAME_LOGIC_UPDATE_INTERVAL_MS);
@@ -545,7 +498,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
           handsRef.current = hands;
       }
 
-      // 4. Detection Loop
       const detect = async () => {
          if (isCancelled) return;
          if (video.readyState >= 2 && handsRef.current && !isDetectingRef.current) {
@@ -575,7 +527,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   return (
     <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
       {errorMessage && (
-        <div className="absolute inset-0 flex items-center justify-center z-50 bg-black p-6 text-center animate-fade-in">
+        <div className="absolute inset-0 flex items-center justify-center z-50 bg-black p-6 text-center">
            <div className="flex flex-col items-center gap-4 max-w-sm">
               <div className="bg-red-500/10 p-4 rounded-full border border-red-500/20">
                  <AlertTriangle className="w-8 h-8 text-red-500" />
@@ -655,7 +607,6 @@ function drawHandOverlay(ctx: CanvasRenderingContext2D, x: number, y: number, ha
   } else if (state === GameState.DETECT_PARTICIPANTS) {
       ctx.strokeStyle = COLORS.primary;
       drawRoundedRect(ctx, x - size/2, y - size/2, size, size, cornerRadius);
-      // Removed label drawing for detected participants to keep UI cleaner/faster
       drawLabel(ctx, x, y - labelOffset, `#${sortedIndex + 1}`, COLORS.primary, minDimension);
   } else if (state === GameState.WAIT_FOR_FISTS_READY) {
       const color = isVisuallyFist ? COLORS.success : COLORS.accent;
