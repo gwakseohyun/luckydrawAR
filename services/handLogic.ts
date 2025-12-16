@@ -42,22 +42,18 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
     : (crossZ > 0.0001 ? 'Palm' : 'Back');
 
   // --- 2. Count Fingers (Extension Logic) ---
+  // A finger is "Extended" if Tip is significantly further from Wrist than PIP.
+  // Using 1.1 multiplier for robustness (Tip must be > 110% of PIP distance).
+  
   let fingersUp = 0;
   
-  // Thumb logic (Same as before)
+  // Thumb (Special Case)
   const thumbTip = landmarks[THUMB_TIP];
-  const thumbIp = landmarks[THUMB_IP];
   const thumbMcp = landmarks[THUMB_MCP];
-  
-  const dThumbTipPinky = distanceSq(thumbTip, pinkyMcp);
-  const dThumbIpPinky = distanceSq(thumbIp, pinkyMcp);
-  
-  // Thumb is extended if tip is far from pinky base AND angle suggests extension
-  // Simplified: Check if tip is further from wrist than MCP
   const dThumbTipWrist = distanceSq(thumbTip, wrist);
   const dThumbMcpWrist = distanceSq(thumbMcp, wrist);
   
-  // If thumb tip is significantly further from wrist than MCP, it's out.
+  // Thumb extended check
   if (dThumbTipWrist > dThumbMcpWrist * 1.1) {
      fingersUp++;
   }
@@ -65,44 +61,43 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
   // Other 4 fingers
   for (const [mcpIdx, pipIdx, _, tipIdx] of FINGERS_INDICES) {
     const tip = landmarks[tipIdx];
-    const mcp = landmarks[mcpIdx];
+    const pip = landmarks[pipIdx];
 
     const dTipWrist = distanceSq(tip, wrist);
-    const dMcpWrist = distanceSq(mcp, wrist);
+    const dPipWrist = distanceSq(pip, wrist);
 
-    // If tip is further from wrist than MCP * ratio, it's open.
-    if (dTipWrist > dMcpWrist * 1.3) {
+    // Extension Check
+    if (dTipWrist > dPipWrist * 1.1) {
       fingersUp++;
     }
   }
 
-  // --- 3. Fist Detection (Ratio Based) ---
-  // A fist is defined by the 4 main fingers being curled in.
-  // We check the ratio of (Wrist->Tip) / (Wrist->MCP).
-  // If Ratio is close to 1.0 (or less), it's folded.
-  // If Ratio is significantly > 1.0, it's extended.
+  // --- 3. Fist Detection (Strict Fold Check) ---
+  // We ignore the thumb for Fist detection because thumb position varies (tucked/side/up).
+  // We strictly check the other 4 fingers (Index, Middle, Ring, Pinky).
+  // A finger is "Folded" if it is NOT extended.
+  // Ideally, for a fist, the Tip should be close to the palm, so Tip-Wrist < PIP-Wrist usually.
+  // But strictly, if it's just "not extended" (dTipWrist <= dPipWrist * 1.2), we count it as potentially folded.
   
   let foldedFingersCount = 0;
-  for (const [mcpIdx, _, __, tipIdx] of FINGERS_INDICES) {
+  for (const [mcpIdx, pipIdx, _, tipIdx] of FINGERS_INDICES) {
       const tip = landmarks[tipIdx];
-      const mcp = landmarks[mcpIdx];
+      const pip = landmarks[pipIdx];
       
-      const distTipWrist = distance(tip, wrist);
-      const distMcpWrist = distance(mcp, wrist);
+      const dTipWrist = distanceSq(tip, wrist);
+      const dPipWrist = distanceSq(pip, wrist);
 
-      // Threshold:
-      // If Tip is not significantly further than MCP (e.g., less than 1.4x distance),
-      // we consider it folded or at least "not extended".
-      // A full extension is usually > 1.8x. A loose fist is ~1.2x.
-      if (distTipWrist < distMcpWrist * 1.4) {
+      // We use a slightly generous threshold for "Folded". 
+      // If the tip is NOT significantly extended (less than 1.3x PIP dist), we treat it as folded/curled.
+      if (dTipWrist < dPipWrist * 1.3) {
           foldedFingersCount++;
       }
   }
 
-  // Robust Fist Condition:
-  // If at least 3 of the 4 main fingers are folded, it is a fist.
-  // We ignore the thumb because thumb placement in a fist varies wildly (tucked in, wrapped around, sticking up).
-  // We also ignore the "facing" check for fist, as a fist looks like a fist from both sides.
+  // Definition of Fist:
+  // At least 3 out of the 4 main fingers must be folded.
+  // This allows for "Pointing" (1 finger up) to be NOT a fist, 
+  // but "Loose Fist" (fingers curled but not tight) to BE a fist.
   const isFist = foldedFingersCount >= 3;
 
   const centroid = {
