@@ -115,14 +115,15 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
             ) : (
                 <>
                    {isDetecting && !canStart && (
-                       <div className="bg-red-500/80 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-lg backdrop-blur">
-                          최소 {winnerCount + 1}명이 필요합니다
+                       <div className="bg-black/60 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg backdrop-blur flex items-center gap-2 border border-white/10">
+                          <span className="text-xl">✋</span>
+                          <span>참가자는 손바닥을 보여주세요</span>
                        </div>
                    )}
                    {isDetecting && canStart && (
                        <div className="bg-yellow-400 text-black px-4 py-2 rounded-full text-sm font-bold shadow-[0_0_20px_rgba(250,204,21,0.6)] flex items-center gap-2 animate-pulse border-2 border-white/20">
                           <span className="text-xl">👌</span>
-                          <span>엄지와 검지로 OK 사인을 보여주세요</span>
+                          <span>대표 1명이 OK 사인을 보여주세요</span>
                        </div>
                    )}
                    {gameState === GameState.SHOW_WINNER && (
@@ -223,9 +224,11 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                 <div className="mb-3 leading-tight text-center font-medium text-gray-200">
                    {isDetecting ? (
                        <div className="flex items-center justify-center gap-2 py-1">
-                         <span className="text-2xl">👌</span>
+                         <span className="text-2xl">{canStart ? '👌' : '✋'}</span>
                          <p className="text-base text-white/90 font-bold">
-                            엄지와 검지로 OK 사인을 보여주세요
+                            {canStart 
+                              ? "대표 1명이 OK 사인을 보여주세요" 
+                              : "모든 참가자가 화면에 손바닥을 보여주세요"}
                          </p>
                        </div>
                    ) : (
