@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef, memo } from 'react';
 import { analyzeHand } from '../services/handLogic';
 import { DetectedHand, GameState, HandLandmark, CameraLayerHandle } from '../types';
@@ -525,7 +524,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   }, [facingMode, userConfirmed]);
 
   return (
-    <div className="relative w-full h-full overflow-hidden rounded-3xl shadow-2xl bg-black">
+    <div className="relative w-full h-full overflow-hidden shadow-2xl bg-black">
       {errorMessage && (
         <div className="absolute inset-0 flex items-center justify-center z-50 bg-black p-6 text-center">
            <div className="flex flex-col items-center gap-4 max-w-sm">
