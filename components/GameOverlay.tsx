@@ -22,17 +22,10 @@ interface GameOverlayProps {
   onUpdateWinnerCount?: (delta: number) => void;
 }
 
-// Custom Icon for Hand Flip Gesture
+// Custom Icon for Hand Gesture (Clean Outline)
 const HandGestureIcon = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
-    <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
-    <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
-    <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
-    <path d="M3 18l3 3 3-3" />
-    <path d="M6 21v-5" />
-    <path d="M20 21l-3-3-3 3" />
-    <path d="M17 21v-5" />
+    <path d="M12 2C12.55 2 13 2.45 13 3V12H14V5C14 4.45 14.45 4 15 4C15.55 4 16 4.45 16 5V12H17V7C17 6.45 17.45 6 18 6C18.55 6 19 6.45 19 7V15C19 18.87 15.87 22 12 22C8.13 22 5 18.87 5 15V9C5 8.45 5.45 8 6 8C6.55 8 7 8.45 7 9V16H8V3C8 2.45 8.45 2 9 2C9.55 2 10 2.45 10 3V12H11V3C11 2.45 11.45 2 12 2Z" />
   </svg>
 );
 
