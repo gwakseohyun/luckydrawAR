@@ -191,17 +191,17 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
       <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-auto">
         <div className={`
             bg-gray-900/90 backdrop-blur-xl border-t border-white/10 
-            rounded-t-3xl transition-all duration-300 ease-spring shadow-[0_-10px_40px_rgba(0,0,0,0.5)]
-            pb-[calc(env(safe-area-inset-bottom)+1.5rem)]
+            rounded-t-2xl transition-all duration-300 ease-spring shadow-[0_-10px_40px_rgba(0,0,0,0.5)]
+            ${isInstructionExpanded ? 'pb-[calc(env(safe-area-inset-bottom)+1.5rem)]' : 'pb-[env(safe-area-inset-bottom)]'}
         `}>
           {/* Toggle Header */}
           <div 
-             className="flex justify-between items-center p-5 cursor-pointer"
+             className="flex justify-between items-center px-5 py-3 cursor-pointer h-14"
              onClick={() => setIsInstructionExpanded(!isInstructionExpanded)}
           >
              <div className="flex items-center gap-2 text-white">
                 <Info className="w-5 h-5 text-yellow-400" />
-                <span className="font-bold text-base">
+                <span className="font-bold text-sm">
                    진행 안내
                 </span>
              </div>
