@@ -4,12 +4,6 @@ import GameOverlay from './components/GameOverlay';
 import { GameState, DetectedHand, CameraLayerHandle } from './types';
 import { X, RefreshCw, ZoomIn, Download, Maximize2 } from 'lucide-react';
 
-// Gesture Steps: 0 (Idle) -> 1 (Palm) -> 2 (Back) -> 3 (Palm) -> 4 (Back/Trigger)
-interface GestureState {
-  step: number;
-  lastTime: number;
-}
-
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.IDLE);
   const [participantCount, setParticipantCount] = useState(0);
@@ -38,8 +32,8 @@ const App: React.FC = () => {
   const [currentZoom, setCurrentZoom] = useState<number>(1);
 
   // Gesture Tracking Refs
-  const handGestureStates = useRef<Map<number, GestureState>>(new Map());
-  const handFacingHistory = useRef<Map<number, { facing: 'Palm' | 'Back', since: number }>>(new Map());
+  // Track how long an OK gesture has been held by each hand
+  const okHoldStartTimesRef = useRef<Map<number, number>>(new Map());
   const lastStateChangeTimeRef = useRef<number>(Date.now());
   const participantCountRef = useRef(participantCount);
   
@@ -79,8 +73,7 @@ const App: React.FC = () => {
     setIsGalleryOpen(false);
     setSelectedImage(null);
     setShouldCapture(false);
-    handGestureStates.current.clear();
-    handFacingHistory.current.clear();
+    okHoldStartTimesRef.current.clear();
     captureTimeoutsRef.current.forEach(t => clearTimeout(t));
     captureTimeoutsRef.current.clear();
   }, [changeState]);
@@ -163,68 +156,36 @@ const App: React.FC = () => {
 
     const isGestureAllowed = !isGalleryOpen && !selectedImage && timer === 0;
 
-    // Gesture control for Confirm
+    // --- Gesture Logic: OK Sign Detection ---
     if (isGestureAllowed && gameState === GameState.DETECT_PARTICIPANTS) {
-      // 1. Cleanup Stale Histories
       const currentStableIds = new Set(detectedHands.map(h => h.stableId));
-      for (const id of handFacingHistory.current.keys()) {
+      
+      // Cleanup stale entries
+      for (const id of okHoldStartTimesRef.current.keys()) {
           if (!currentStableIds.has(id)) {
-              handFacingHistory.current.delete(id);
-              handGestureStates.current.delete(id);
+              okHoldStartTimesRef.current.delete(id);
           }
       }
 
       detectedHands.forEach((hand) => {
-        // --- STABILITY CHECK ---
-        // Reduced threshold to 60ms to catch faster flips
-        const STABILITY_THRESHOLD = 60; // ms
-        
-        let history = handFacingHistory.current.get(hand.stableId);
-        
-        if (!history || history.facing !== hand.facing) {
-            // State changed or new hand, reset timer
-            handFacingHistory.current.set(hand.stableId, { facing: hand.facing, since: now });
-            return; // Wait for stability
-        }
-
-        if (now - history.since < STABILITY_THRESHOLD) {
-            return; // Not stable enough yet
-        }
-
-        // --- GESTURE LOGIC ---
-        // Only use the stable facing value
-        const stableFacing = history.facing;
-        let gState = handGestureStates.current.get(hand.stableId) || { step: 0, lastTime: now };
-        
-        // Timeout for gesture sequence (2000ms)
-        if (gState.step > 0 && now - gState.lastTime > 2000) { 
-          gState = { step: 0, lastTime: now };
-        }
-
-        let nextStep = gState.step;
-
-        // Sequence: Palm -> Back -> Palm -> Back (Trigger)
-        // Note: Users might start showing Back, which won't trigger step 1.
-        // We enforce starting with Palm to ensure intent.
-        if (gState.step === 0) {
-          if (stableFacing === 'Palm') nextStep = 1;
-        } else if (gState.step === 1) { 
-          if (stableFacing === 'Back') nextStep = 2; 
-        } else if (gState.step === 2) { 
-          if (stableFacing === 'Palm') nextStep = 3;
-        } else if (gState.step === 3) { 
-          if (stableFacing === 'Back') {
-             nextStep = 0; 
-             // Trigger action
-             if (gameState === GameState.DETECT_PARTICIPANTS) {
-                if (detectedHands.length > winnerCount) handleConfirmParticipants();
-             }
+          if (hand.isOk) {
+              if (!okHoldStartTimesRef.current.has(hand.stableId)) {
+                  okHoldStartTimesRef.current.set(hand.stableId, now);
+              } else {
+                  const startTime = okHoldStartTimesRef.current.get(hand.stableId)!;
+                  const duration = now - startTime;
+                  // If held for > 0.8 seconds, trigger
+                  if (duration > 800) {
+                      if (detectedHands.length > winnerCount) {
+                          handleConfirmParticipants();
+                          okHoldStartTimesRef.current.clear(); // Reset trigger
+                      }
+                  }
+              }
+          } else {
+              // If OK sign is lost, reset the timer for this hand
+              okHoldStartTimesRef.current.delete(hand.stableId);
           }
-        }
-
-        if (nextStep !== gState.step) {
-          handGestureStates.current.set(hand.stableId, { step: nextStep, lastTime: now });
-        }
       });
     }
 
