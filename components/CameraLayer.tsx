@@ -30,13 +30,13 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // --- Advanced Tracking Configuration ---
-const MAX_TRACKING_DISTANCE = 0.5; 
+const MAX_TRACKING_DISTANCE = 0.25; // Tightened from 0.5 to prevent jumping to neighbors
 const DUPLICATE_HAND_THRESHOLD = 0.08; 
 const FRAME_PERSISTENCE_THRESHOLD = 1; 
 const MAX_MISSING_FRAMES = 60; 
 
 // Visual Smoothing
-const POS_SMOOTHING_FACTOR = 0.6; 
+const POS_SMOOTHING_FACTOR = 0.4; // Reduced from 0.6 for smoother, less jittery movement
 const FIST_CONFIDENCE_THRESHOLD = 0.5; 
 const FIST_CONFIDENCE_DECAY = 0.3; 
 
@@ -332,7 +332,8 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    if (vState && (now - vState.lastSeen < 1000)) { // 1 second timeout
+                    // Increased ghost persistence to 2000ms to allow "locking" on last position if tracking gets too strict/fails
+                    if (vState && (now - vState.lastSeen < 2000)) { 
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -490,8 +491,24 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                      const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
                      const handednessPenalty = (track.label !== input.label) ? 0.05 : 0; 
                      let cost = dist + handednessPenalty;
-                     if (isWinner) cost -= 1.0; 
-                     if (dist < MAX_TRACKING_DISTANCE) matches.push({trackIdx, inputIdx, cost});
+                     
+                     if (isWinner) {
+                         // Sticky Logic:
+                         // If the hand is very close to the last known position of the winner (approx 12% of screen),
+                         // we lock it down hard (huge cost reduction).
+                         if (dist < 0.12) { 
+                            cost -= 10.0; 
+                         } else {
+                            // If it's further away, we actively discourage the winner ID from jumping to this hand.
+                            // It's better to lose the track (and show ghost) than to jump to a neighbor.
+                            cost += 5.0; 
+                         }
+                     }
+                     
+                     // Only add if within the tracking distance
+                     if (dist < MAX_TRACKING_DISTANCE) {
+                         matches.push({trackIdx, inputIdx, cost});
+                     }
                  });
              });
              matches.sort((a, b) => a.cost - b.cost);
