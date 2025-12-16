@@ -30,19 +30,19 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // --- Advanced Tracking Configuration ---
-const MAX_TRACKING_DISTANCE = 0.35; // Increased allowance for fast movement
-const DUPLICATE_HAND_THRESHOLD = 0.15; // Minimum distance between two distinct hands (Spatial Deduplication)
-const FRAME_PERSISTENCE_THRESHOLD = 1; // Instant tracking for responsiveness
-const MAX_MISSING_FRAMES = 15; // Keep ID alive for ~0.5-1s if lost (e.g. out of frame/occluded)
+const MAX_TRACKING_DISTANCE = 0.4; // Increased allowance for fast movement
+const DUPLICATE_HAND_THRESHOLD = 0.05; // Tightened threshold (5% of screen) to prevent merging adjacent hands
+const FRAME_PERSISTENCE_THRESHOLD = 1; 
+const MAX_MISSING_FRAMES = 30; // Increased to keep ID alive longer (approx 1 sec at 30fps)
 
 // Visual Smoothing
 const POS_SMOOTHING_FACTOR = 0.5; 
 const FIST_CONFIDENCE_THRESHOLD = 0.6; 
 const FIST_CONFIDENCE_DECAY = 0.25; 
 
-const GAME_LOGIC_UPDATE_INTERVAL_MS = 50; 
+const GAME_LOGIC_UPDATE_INTERVAL_MS = 30; // Faster updates
 
-let nextStableId = 1000; // Start high to avoid confusion
+let nextStableId = 1000; 
 
 interface VisualState {
   x: number;
@@ -55,12 +55,12 @@ interface VisualState {
 interface TrackedHand {
     id: number;
     centroid: {x: number, y: number};
-    velocity: {dx: number, dy: number}; // For prediction
+    velocity: {dx: number, dy: number}; 
     lastSeen: number;
     frameCount: number; 
     missingCount: number;
     label: 'Left' | 'Right';
-    _tempMpIndex?: number; // Internal Use
+    _tempMpIndex?: number; 
 }
 
 const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({ 
@@ -196,7 +196,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         frameCounterRef.current++;
 
         if (video.readyState >= 2) {
-           // Responsive Canvas Sizing
            const dpr = Math.min(window.devicePixelRatio || 1, 2);
            const displayWidth = Math.floor(window.innerWidth * dpr);
            const displayHeight = Math.floor(window.innerHeight * dpr);
@@ -212,7 +211,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            const cw = canvas.width;
            const ch = canvas.height;
 
-           // Calculate "Cover" Crop to fill the screen
            const videoRatio = vw / vh;
            const canvasRatio = cw / ch;
            
@@ -226,12 +224,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                sWidth = vh * canvasRatio;
            }
 
-           // Apply Digital Zoom
            const zoomLevel = zoom.type === 'digital' ? Math.max(1, zoom.current) : 1;
            sWidth /= zoomLevel;
            sHeight /= zoomLevel;
 
-           // Center the crop
            sx = (vw - sWidth) / 2;
            sy = (vh - sHeight) / 2;
 
@@ -241,7 +237,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              ctx.scale(-1, 1);
            }
 
-           // Draw the cropped/zoomed video to fill canvas
            ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, cw, ch);
            ctx.restore();
         }
@@ -252,6 +247,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         const visualMap = visualStateMapRef.current;
         const now = Date.now();
 
+        // Detect current hands
         hands.forEach((hand, idx) => {
            let vState = visualMap.get(hand.stableId);
            const targetX = hand.centroid.x * canvas.width;
@@ -285,13 +281,19 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            drawHandOverlay(ctx, vState.x, vState.y, hand, currentGameState, idx, isWinner, vState.isVisuallyFist);
         });
 
-        // Maintain visual ghosts for winners
+        // ----------------------------------------------------------------------
+        // FIX: Persistent Winner Ghost Logic
+        // If we are in SHOW_WINNER state, we check for any winning ID that isn't currently detected.
+        // We draw the winner ball at its last known location forever (until reset).
+        // ----------------------------------------------------------------------
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    if (vState && (now - vState.lastSeen < 1500)) { // Show ghost for 1.5s
+                    if (vState) {
+                        // REMOVED TIME CHECK: if (now - vState.lastSeen < 1500)
+                        // Always draw ghost for winner
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -300,8 +302,12 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
+        // Cleanup Logic: Don't remove Winning IDs from visual map
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
+                // If it's a winner, don't expire it from memory
+                if (currentWinningIds.includes(id)) continue;
+                
                 if (now - state.lastSeen > 5000) {
                     visualMap.delete(id);
                 }
@@ -346,11 +352,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              locateFile: (file: string) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
           });
 
-          // Optimized options for high accuracy in crowded scenes
           hands.setOptions({
              maxNumHands: 20, 
-             modelComplexity: 1, // Use higher complexity model for better accuracy
-             minDetectionConfidence: 0.6, // Slightly lower to catch fast hands, tracking will filter noise
+             modelComplexity: 1, 
+             minDetectionConfidence: 0.5, // Lowered slightly to improve recall
              minTrackingConfidence: 0.5
           });
 
@@ -359,7 +364,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              isDetectingRef.current = false;
              const now = Date.now();
 
-             // 1. Raw Extraction
              const rawInputs: {x: number, y: number, index: number, label: 'Left' | 'Right'}[] = [];
              if (results.multiHandLandmarks) {
                 results.multiHandLandmarks.forEach((landmarks, i) => {
@@ -370,53 +374,47 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 });
              }
 
-             // 2. Spatial De-duplication (Merge hands that are too close)
+             // Deduplication
              const uniqueInputs: typeof rawInputs = [];
              const processedIndices = new Set<number>();
 
-             // Sort inputs by x to make simple proximity checks or just O(N^2) for small N
              for (let i = 0; i < rawInputs.length; i++) {
                  if (processedIndices.has(i)) continue;
                  const handA = rawInputs[i];
                  let bestCandidate = handA;
                  processedIndices.add(i);
 
-                 // Check against all others
                  for (let j = i + 1; j < rawInputs.length; j++) {
                      if (processedIndices.has(j)) continue;
                      const handB = rawInputs[j];
                      const dist = Math.sqrt((handA.x - handB.x)**2 + (handA.y - handB.y)**2);
                      
                      if (dist < DUPLICATE_HAND_THRESHOLD) {
-                         // Merge: usually keep the one with better handedness score or just first one
                          processedIndices.add(j); 
                      }
                  }
                  uniqueInputs.push(bestCandidate);
              }
 
-             // 3. Tracking Update (Hungarian-ish / Greedy with weighted cost)
              const activeTracks = tracksRef.current;
              
-             // Prediction Step: Move tracks by velocity
              activeTracks.forEach(t => {
                  t.missingCount++;
                  t.centroid.x += t.velocity.dx;
                  t.centroid.y += t.velocity.dy;
              });
 
-             // Cost Matrix Calculation
              const matches: {trackIdx: number, inputIdx: number, cost: number}[] = [];
              
              activeTracks.forEach((track, trackIdx) => {
                  uniqueInputs.forEach((input, inputIdx) => {
                      const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
                      
-                     // Penalize Handedness Mismatch heavily
-                     // If track was Left and input is Right, add huge cost
-                     const handednessPenalty = (track.label !== input.label) ? 0.5 : 0; 
+                     // FIX: Reduced handedness penalty dramatically.
+                     // Fists often have unstable handedness in MediaPipe. 
+                     // Position is the primary truth.
+                     const handednessPenalty = (track.label !== input.label) ? 0.05 : 0; 
                      
-                     // Distance Threshold
                      if (dist < MAX_TRACKING_DISTANCE) {
                          const cost = dist + handednessPenalty;
                          matches.push({trackIdx, inputIdx, cost});
@@ -424,7 +422,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  });
              });
 
-             // Sort by lowest cost (Greedy matching)
              matches.sort((a, b) => a.cost - b.cost);
 
              const matchedTrackIndices = new Set<number>();
@@ -436,7 +433,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  const track = activeTracks[trackIdx];
                  const input = uniqueInputs[inputIdx];
                  
-                 // Update Velocity (Simple low-pass filter)
                  const vx = input.x - track.centroid.x;
                  const vy = input.y - track.centroid.y;
                  track.velocity.dx = track.velocity.dx * 0.5 + vx * 0.5;
@@ -448,13 +444,12 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  track.frameCount++;
                  track.missingCount = 0;
                  track._tempMpIndex = input.index;
-                 track.label = input.label; // Update label if confidence flipped, but tracking holds ID
+                 track.label = input.label; 
 
                  matchedTrackIndices.add(trackIdx);
                  matchedInputIndices.add(inputIdx);
              });
 
-             // 4. Create New Tracks
              uniqueInputs.forEach((input, idx) => {
                  if (!matchedInputIndices.has(idx)) {
                      activeTracks.push({
@@ -470,26 +465,18 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  }
              });
 
-             // 5. Prune Dead Tracks
              const keptTracks = activeTracks.filter(t => t.missingCount < MAX_MISSING_FRAMES);
              tracksRef.current = keptTracks;
 
-             // 6. Generate Final Data
              const finalHands: DetectedHand[] = [];
              
              keptTracks.forEach(track => {
-                 // Only expose tracks that are visible NOW or have very high persistence
                  if (track.missingCount === 0 && track._tempMpIndex !== undefined && results.multiHandLandmarks[track._tempMpIndex]) {
-                     // Check persistence threshold to avoid flickering noise
                      if (track.frameCount >= FRAME_PERSISTENCE_THRESHOLD) {
                          const landmarks = results.multiHandLandmarks[track._tempMpIndex];
                          const handData = analyzeHand(landmarks, track._tempMpIndex, track.label, track.id);
                          finalHands.push(handData);
                      }
-                 } else if (track.missingCount > 0 && track.missingCount < 5) {
-                    // OPTIONAL: Return a "predicted" hand if we want ultra-smoothness, 
-                    // but for game logic, it's better to only return valid detections 
-                    // and let the app logic handle the "missing" state.
                  }
              });
 
