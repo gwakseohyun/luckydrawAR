@@ -1,7 +1,0 @@
-{
-  "name": "Lucky Draw AR",
-  "description": "A gesture-based lottery game using hand tracking to select winners from a group.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}
