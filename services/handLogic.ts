@@ -20,81 +20,91 @@ const distanceSq = (p1: HandLandmark, p2: HandLandmark): number => {
   return (p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2;
 };
 
+// Euclidean distance
+const distance = (p1: HandLandmark, p2: HandLandmark): number => {
+  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+};
+
 export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right', stableId: number = -1): DetectedHand => {
   const wrist = landmarks[WRIST];
   const indexMcp = landmarks[5];
   const pinkyMcp = landmarks[17];
 
   // --- 1. Detect Facing (Palm vs Back) ---
-  // Using Cross Product of vectors (Wrist->Index) x (Wrist->Pinky)
-  // Z-coordinate check determines palm direction relative to camera
   const v1x = indexMcp.x - wrist.x;
   const v1y = indexMcp.y - wrist.y;
   const v2x = pinkyMcp.x - wrist.x;
   const v2y = pinkyMcp.y - wrist.y;
   const crossZ = v1x * v2y - v1y * v2x;
 
-  // Refined threshold for facing detection to prevent jitter
   const facing: 'Palm' | 'Back' = handednessLabel === 'Right' 
     ? (crossZ < -0.0001 ? 'Palm' : 'Back') 
     : (crossZ > 0.0001 ? 'Palm' : 'Back');
 
-  // --- 2. Count Fingers (Index to Pinky) ---
+  // --- 2. Count Fingers (Extension Logic) ---
   let fingersUp = 0;
   
+  // Thumb logic (Same as before)
+  const thumbTip = landmarks[THUMB_TIP];
+  const thumbIp = landmarks[THUMB_IP];
+  const thumbMcp = landmarks[THUMB_MCP];
+  
+  const dThumbTipPinky = distanceSq(thumbTip, pinkyMcp);
+  const dThumbIpPinky = distanceSq(thumbIp, pinkyMcp);
+  
+  // Thumb is extended if tip is far from pinky base AND angle suggests extension
+  // Simplified: Check if tip is further from wrist than MCP
+  const dThumbTipWrist = distanceSq(thumbTip, wrist);
+  const dThumbMcpWrist = distanceSq(thumbMcp, wrist);
+  
+  // If thumb tip is significantly further from wrist than MCP, it's out.
+  if (dThumbTipWrist > dThumbMcpWrist * 1.1) {
+     fingersUp++;
+  }
+
+  // Other 4 fingers
   for (const [mcpIdx, pipIdx, _, tipIdx] of FINGERS_INDICES) {
     const tip = landmarks[tipIdx];
-    const pip = landmarks[pipIdx];
     const mcp = landmarks[mcpIdx];
 
-    // Distance Squared comparisons
     const dTipWrist = distanceSq(tip, wrist);
-    const dPipWrist = distanceSq(pip, wrist);
     const dMcpWrist = distanceSq(mcp, wrist);
 
-    // Logic: A finger is "Extended" if Tip is further from wrist than PIP (by 10% margin) AND Tip is further than MCP.
-    if (dTipWrist > dPipWrist * 1.1 && dTipWrist > dMcpWrist) {
+    // If tip is further from wrist than MCP * ratio, it's open.
+    if (dTipWrist > dMcpWrist * 1.3) {
       fingersUp++;
     }
   }
 
-  // --- 3. Thumb Detection ---
-  const thumbTip = landmarks[THUMB_TIP];
-  const thumbIp = landmarks[THUMB_IP];
+  // --- 3. Fist Detection (Ratio Based) ---
+  // A fist is defined by the 4 main fingers being curled in.
+  // We check the ratio of (Wrist->Tip) / (Wrist->MCP).
+  // If Ratio is close to 1.0 (or less), it's folded.
+  // If Ratio is significantly > 1.0, it's extended.
   
-  // Thumb logic needs real distances ratio comparison, but we can do it with squares
-  // 1.1 threshold squared is ~1.21
-  const dThumbTipIndexMcp = distanceSq(thumbTip, indexMcp);
-  const dThumbIpIndexMcp = distanceSq(thumbIp, indexMcp);
-  const dThumbTipPinky = distanceSq(thumbTip, pinkyMcp);
-  const dThumbIpPinky = distanceSq(thumbIp, pinkyMcp);
-
-  // 1. Thumb is NOT tucked (Tip further from Pinky than IP)
-  const isNotTucked = dThumbTipPinky > dThumbIpPinky;
-  // 2. Thumb is extending OUT (Tip further from Index MCP than IP)
-  const isExtendedOut = dThumbTipIndexMcp > dThumbIpIndexMcp * 1.2;
-
-  if (isNotTucked && isExtendedOut) {
-      fingersUp++;
-  }
-
-  // --- 4. Fist Detection (Refined) ---
-  // Fist = 0 main fingers extended. (Strict).
-  // We re-verify main fingers with a slightly more lenient threshold for "foldedness" check.
-  let mainFingersExtended = 0;
-  for (const [_, pipIdx, __, tipIdx] of FINGERS_INDICES) {
+  let foldedFingersCount = 0;
+  for (const [mcpIdx, _, __, tipIdx] of FINGERS_INDICES) {
       const tip = landmarks[tipIdx];
-      const pip = landmarks[pipIdx];
+      const mcp = landmarks[mcpIdx];
       
-      // If Tip is further than PIP (even slightly), it's not fully folded
-      if (distanceSq(tip, wrist) > distanceSq(pip, wrist)) {
-          mainFingersExtended++;
+      const distTipWrist = distance(tip, wrist);
+      const distMcpWrist = distance(mcp, wrist);
+
+      // Threshold:
+      // If Tip is not significantly further than MCP (e.g., less than 1.4x distance),
+      // we consider it folded or at least "not extended".
+      // A full extension is usually > 1.8x. A loose fist is ~1.2x.
+      if (distTipWrist < distMcpWrist * 1.4) {
+          foldedFingersCount++;
       }
   }
 
-  const isFist = mainFingersExtended === 0;
+  // Robust Fist Condition:
+  // If at least 3 of the 4 main fingers are folded, it is a fist.
+  // We ignore the thumb because thumb placement in a fist varies wildly (tucked in, wrapped around, sticking up).
+  // We also ignore the "facing" check for fist, as a fist looks like a fist from both sides.
+  const isFist = foldedFingersCount >= 3;
 
-  // Centroid (approximate palm center)
   const centroid = {
     x: landmarks[9].x, 
     y: landmarks[9].y
