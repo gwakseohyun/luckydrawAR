@@ -20,7 +20,7 @@ const App: React.FC = () => {
   const lastValidConditionTimeRef = useRef<number>(0);
   
   // Capture Logic
-  const [shouldCapture, setShouldCapture] = useState(false);
+  const [captureQueue, setCaptureQueue] = useState<number[]>([]);
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [capturedWinnerIds, setCapturedWinnerIds] = useState<Set<number>>(new Set());
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
@@ -72,7 +72,7 @@ const App: React.FC = () => {
     setCapturedWinnerIds(new Set());
     setIsGalleryOpen(false);
     setSelectedImage(null);
-    setShouldCapture(false);
+    setCaptureQueue([]);
     okHoldStartTimesRef.current.clear();
     captureTimeoutsRef.current.forEach(t => clearTimeout(t));
     captureTimeoutsRef.current.clear();
@@ -111,7 +111,7 @@ const App: React.FC = () => {
     if (images.length > 0) {
        setGalleryImages(prev => [...prev, ...images]);
     }
-    setShouldCapture(false);
+    setCaptureQueue([]);
   }, []);
 
   const downloadImage = (src: string, index: number) => {
@@ -266,7 +266,7 @@ const App: React.FC = () => {
                               next.add(id);
                               return next;
                           });
-                          setShouldCapture(true);
+                          setCaptureQueue(prev => [...prev, id]);
                           captureTimeoutsRef.current.delete(id);
                       }, 500); 
                       captureTimeoutsRef.current.set(id, timeout);
@@ -316,7 +316,7 @@ const App: React.FC = () => {
           gameState={gameState} 
           onHandsUpdate={setDetectedHands} 
           winningStableIds={winningStableIds}
-          triggerCapture={shouldCapture}
+          captureTargets={captureQueue}
           onCaptureComplete={handleCaptureComplete}
           onZoomInit={handleZoomInit}
           onStreamReady={handleStreamReady}
