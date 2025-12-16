@@ -30,15 +30,15 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // --- Advanced Tracking Configuration ---
-const MAX_TRACKING_DISTANCE = 0.5; // Very generous to prevent ID switching on fast motion
-const DUPLICATE_HAND_THRESHOLD = 0.08; // Balanced: 8% of screen. Too low = split hands, Too high = merged neighbors.
+const MAX_TRACKING_DISTANCE = 0.5; // High tolerance for movement
+const DUPLICATE_HAND_THRESHOLD = 0.08; 
 const FRAME_PERSISTENCE_THRESHOLD = 1; 
-const MAX_MISSING_FRAMES = 45; // 1.5 seconds persistence for ID logic
+const MAX_MISSING_FRAMES = 60; // 2 seconds persistence
 
 // Visual Smoothing
-const POS_SMOOTHING_FACTOR = 0.5; 
-const FIST_CONFIDENCE_THRESHOLD = 0.5; // Lower threshold for easier visual feedback
-const FIST_CONFIDENCE_DECAY = 0.2; 
+const POS_SMOOTHING_FACTOR = 0.6; // Slightly faster smoothing
+const FIST_CONFIDENCE_THRESHOLD = 0.5; 
+const FIST_CONFIDENCE_DECAY = 0.3; // Faster reaction to fist/open changes
 
 const GAME_LOGIC_UPDATE_INTERVAL_MS = 30; 
 
@@ -291,7 +291,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
                     if (vState) {
-                        // Draw ghost. Pass isGhost=true but handle opacity in the function.
+                        // Keep respect for isVisuallyFist state even in ghost mode
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -303,7 +303,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         // Cleanup Logic
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
-                // CRITICAL: Never remove a winner's visual state from memory
+                // Never remove a winner's visual state
                 if (currentWinningIds.includes(id)) continue;
                 
                 if (now - state.lastSeen > 5000) {
@@ -361,6 +361,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              if (isLoadingModel) setIsLoadingModel(false);
              isDetectingRef.current = false;
              const now = Date.now();
+             const currentWinningIds = winningIdsRef.current; // Access current winners here
 
              const rawInputs: {x: number, y: number, index: number, label: 'Left' | 'Right'}[] = [];
              if (results.multiHandLandmarks) {
@@ -405,13 +406,27 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              const matches: {trackIdx: number, inputIdx: number, cost: number}[] = [];
              
              activeTracks.forEach((track, trackIdx) => {
+                 // Check if this track is a Winner. If so, we want to be VERY sticky.
+                 const isWinner = currentWinningIds.includes(track.id);
+
                  uniqueInputs.forEach((input, inputIdx) => {
                      const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
                      
+                     // Penalty for switching hands (Left <-> Right)
                      const handednessPenalty = (track.label !== input.label) ? 0.05 : 0; 
                      
+                     // Cost calculation
+                     let cost = dist + handednessPenalty;
+                     
+                     // Sticky Winner Logic:
+                     // If this is a winner track, substract a huge value from cost.
+                     // This ensures that when sorting by cost (ascending), this match comes first.
+                     // It effectively prioritizes maintaining the winner track over anything else.
+                     if (isWinner) {
+                        cost -= 1.0; 
+                     }
+
                      if (dist < MAX_TRACKING_DISTANCE) {
-                         const cost = dist + handednessPenalty;
                          matches.push({trackIdx, inputIdx, cost});
                      }
                  });
