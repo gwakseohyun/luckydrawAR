@@ -99,7 +99,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
     <div className="absolute inset-0 pointer-events-none flex flex-col justify-between z-10 safe-area-inset">
       
       {/* Top Section */}
-      <div className="w-full flex justify-between items-start p-4 pt-6 relative">
+      <div className="w-full flex justify-between items-start p-4 pt-6 relative shrink-0">
          <div className="flex-1 flex justify-center pt-2">
             {warningMessage ? (
                <div className="animate-bounce-short bg-red-500/90 text-white px-4 py-1.5 rounded-full shadow-lg backdrop-blur flex items-center gap-2">
@@ -143,8 +143,8 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
          </div>
       </div>
 
-      {/* Center Feedback */}
-      <div className="flex-1 flex flex-col items-center justify-start pt-32 pointer-events-none relative pb-20">
+      {/* Center Feedback (Responsive Centering) */}
+      <div className="flex-1 flex flex-col items-center justify-center pointer-events-none relative w-full pb-32">
         
         {isDetecting && (
           <div className="flex flex-col items-center gap-6">
@@ -164,7 +164,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
         )}
 
         {isHolding && timer > 0 && (
-           <div className="flex items-center justify-center mt-10">
+           <div className="flex items-center justify-center">
              <div className="relative flex items-center justify-center w-40 h-40">
                <svg className="absolute w-full h-full transform -rotate-90" viewBox="0 0 140 140">
                  <circle cx="70" cy="70" r="60" fill="transparent" stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
@@ -188,7 +188,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
       </div>
 
       {/* Bottom Bar (Docked Bottom Sheet) */}
-      <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-auto">
+      <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-auto shrink-0">
         <div className={`
             bg-gray-900/90 backdrop-blur-xl border-t border-white/10 
             rounded-t-2xl transition-all duration-300 ease-spring shadow-[0_-10px_40px_rgba(0,0,0,0.5)]
