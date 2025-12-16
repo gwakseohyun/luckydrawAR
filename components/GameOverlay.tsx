@@ -22,6 +22,20 @@ interface GameOverlayProps {
   onUpdateWinnerCount?: (delta: number) => void;
 }
 
+// Custom Icon for Hand Flip Gesture
+const HandGestureIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0" />
+    <path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2" />
+    <path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8" />
+    <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+    <path d="M3 18l3 3 3-3" />
+    <path d="M6 21v-5" />
+    <path d="M20 21l-3-3-3 3" />
+    <path d="M17 21v-5" />
+  </svg>
+);
+
 const GameOverlay: React.FC<GameOverlayProps> = memo(({
   gameState,
   participantCount,
@@ -114,8 +128,9 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                        </div>
                    )}
                    {isDetecting && canStart && (
-                       <div className="bg-black/40 text-white/90 px-4 py-1.5 rounded-full text-xs font-medium border border-white/10 backdrop-blur">
-                          손바닥을 빠르게 뒤집으면 진행됩니다
+                       <div className="bg-yellow-400 text-black px-5 py-2.5 rounded-full text-sm font-bold shadow-[0_0_20px_rgba(250,204,21,0.6)] flex items-center gap-3 animate-pulse border-2 border-white/20">
+                          <HandGestureIcon className="w-5 h-5" />
+                          <span>손바닥을 2번 뒤집어 시작하기</span>
                        </div>
                    )}
                    {gameState === GameState.SHOW_WINNER && (
@@ -215,9 +230,15 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
              <div className="px-5 pb-2 animate-fade-in">
                 <div className="mb-6 leading-relaxed text-center font-medium text-gray-200">
                    {isDetecting ? (
-                       <div className="flex flex-col gap-1">
-                         <p className="text-lg">카메라에 손바닥을 보여주세요.</p>
-                         <p className="text-white/50 text-sm">2명 이상 모이면 게임을 시작할 수 있습니다.</p>
+                       <div className="flex flex-col gap-2 items-center">
+                         <div className="flex items-center gap-2 text-yellow-400 mb-1">
+                             <HandGestureIcon className="w-6 h-6" />
+                             <span className="font-bold text-lg">시작 제스처</span>
+                         </div>
+                         <p className="text-lg text-white/90">
+                            시작하려면 대표 1명이 손바닥을 <br/>
+                            <span className="text-yellow-400 font-bold underline underline-offset-4">빠르게 2번</span> 뒤집어주세요
+                         </p>
                        </div>
                    ) : (
                        <p className="text-lg">{INSTRUCTIONS[gameState]}</p>
@@ -268,7 +289,7 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                                 </div>
                              ) : (
                                 <div className="w-full bg-white/5 text-white/30 font-bold py-4 rounded-2xl border border-white/5 flex items-center justify-center text-sm">
-                                    {canStart ? "시작 버튼을 눌러주세요" : "인원 모으는 중..."}
+                                    {canStart ? "제스처로 시작할 수 있습니다" : "인원 모으는 중..."}
                                 </div>
                              )}
                            </>
