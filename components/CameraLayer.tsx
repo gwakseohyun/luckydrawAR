@@ -30,15 +30,15 @@ const lerp = (start: number, end: number, t: number) => {
 };
 
 // --- Advanced Tracking Configuration ---
-const MAX_TRACKING_DISTANCE = 0.5; // High tolerance for movement
+const MAX_TRACKING_DISTANCE = 0.5; 
 const DUPLICATE_HAND_THRESHOLD = 0.08; 
 const FRAME_PERSISTENCE_THRESHOLD = 1; 
-const MAX_MISSING_FRAMES = 60; // 2 seconds persistence
+const MAX_MISSING_FRAMES = 60; 
 
 // Visual Smoothing
-const POS_SMOOTHING_FACTOR = 0.6; // Slightly faster smoothing
+const POS_SMOOTHING_FACTOR = 0.6; 
 const FIST_CONFIDENCE_THRESHOLD = 0.5; 
-const FIST_CONFIDENCE_DECAY = 0.3; // Faster reaction to fist/open changes
+const FIST_CONFIDENCE_DECAY = 0.3; 
 
 const GAME_LOGIC_UPDATE_INTERVAL_MS = 30; 
 
@@ -75,6 +75,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   
   // UI States
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -122,6 +123,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
     toggleCamera: () => {
        setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
        setIsStreamReady(false);
+       // Reset stream ready state to trigger re-init
     },
     setZoom: (zoom: number) => {
        zoomStateRef.current.current = zoom;
@@ -132,25 +134,35 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
     }
   }));
 
+  // Camera Initialization Effect
   useEffect(() => {
     if (!userConfirmed) return;
 
-    let isCancelled = false;
+    let isMounted = true;
+    
+    // Cleanup function to stop tracks
+    const stopStream = () => {
+       if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+       }
+       if (videoRef.current) {
+          videoRef.current.srcObject = null;
+       }
+    };
 
     const initSystem = async () => {
       setErrorMessage(null);
+      stopStream(); // Ensure clean slate
+      
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas) return;
+
       const ctx = canvas.getContext('2d', { alpha: false });
       if (!ctx) return;
 
       try {
-        if (video.srcObject) {
-          const stream = video.srcObject as MediaStream;
-          stream.getTracks().forEach(t => t.stop());
-        }
-        
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: facingMode,
@@ -160,10 +172,18 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
           audio: false
         });
         
+        if (!isMounted) {
+            stream.getTracks().forEach(t => t.stop());
+            return;
+        }
+
+        streamRef.current = stream;
         video.srcObject = stream;
+        
         const videoTrack = stream.getVideoTracks()[0];
         videoTrackRef.current = videoTrack;
 
+        // --- Zoom Setup ---
         const capabilities = videoTrack.getCapabilities ? (videoTrack.getCapabilities() as any) : {};
         if (capabilities.zoom && capabilities.zoom.min !== capabilities.zoom.max) {
             const minZoom = capabilities.zoom.min;
@@ -177,22 +197,44 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             if (onZoomInit) onZoomInit(1, 3, 0.1, 1);
         }
 
-        video.onloadedmetadata = () => {
-           video.play().then(() => { 
-               if (!isCancelled) {
-                   setIsStreamReady(true);
-                   if (onStreamReady) onStreamReady();
-               }
-           })
-             .catch(e => setErrorMessage("화면을 터치하여 카메라를 시작해주세요."));
+        // --- Video Playback Handling ---
+        const handleVideoReady = () => {
+            if (!isMounted) return;
+            video.play()
+                .then(() => {
+                    if (isMounted) {
+                        setIsStreamReady(true);
+                        if (onStreamReady) onStreamReady();
+                    }
+                })
+                .catch(e => {
+                    console.error("Video play failed:", e);
+                    if (isMounted) setErrorMessage("화면을 터치하여 카메라를 시작해주세요.");
+                });
         };
+
+        // If metadata is already loaded (can happen with cached streams), trigger immediately
+        if (video.readyState >= 2) {
+            handleVideoReady();
+        } else {
+            video.onloadedmetadata = handleVideoReady;
+            // Fallback: sometimes onloadedmetadata doesn't fire on some android webviews
+            setTimeout(() => {
+                if (video.readyState >= 2 && !isStreamReady) {
+                   handleVideoReady();
+                }
+            }, 500);
+        }
+
       } catch (e: any) {
-        setErrorMessage("카메라 권한을 확인해주세요.");
+        console.error("Camera access error:", e);
+        if (isMounted) setErrorMessage("카메라 권한을 확인해주세요.");
         return;
       }
 
+      // --- Render Loop ---
       const render = () => {
-        if (isCancelled) return;
+        if (!isMounted) return;
         frameCounterRef.current++;
 
         if (video.readyState >= 2) {
@@ -241,13 +283,13 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            ctx.restore();
         }
 
+        // Draw overlays...
         const hands = detectedHandsRef.current;
         const currentGameState = gameStateRef.current;
         const currentWinningIds = winningIdsRef.current;
         const visualMap = visualStateMapRef.current;
         const now = Date.now();
 
-        // Update Visual States from Detected Hands
         hands.forEach((hand, idx) => {
            let vState = visualMap.get(hand.stableId);
            const targetX = hand.centroid.x * canvas.width;
@@ -281,17 +323,13 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            drawHandOverlay(ctx, vState.x, vState.y, hand, currentGameState, idx, isWinner, vState.isVisuallyFist);
         });
 
-        // ----------------------------------------------------------------------
-        // PERSISTENT GHOST LOGIC
-        // Draw winning balls for IDs that are NOT currently detected.
-        // ----------------------------------------------------------------------
+        // Persistent Ghost Logic
         if (currentGameState === GameState.SHOW_WINNER) {
             currentWinningIds.forEach(winId => {
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
                     if (vState) {
-                        // Keep respect for isVisuallyFist state even in ghost mode
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -300,18 +338,17 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
             });
         }
 
-        // Cleanup Logic
+        // Cleanup visuals
         if (frameCounterRef.current % 60 === 0) {
             for (const [id, state] of visualMap.entries()) {
-                // Never remove a winner's visual state
                 if (currentWinningIds.includes(id)) continue;
-                
                 if (now - state.lastSeen > 5000) {
                     visualMap.delete(id);
                 }
             }
         }
 
+        // Capture logic
         if (triggerCaptureRef.current) {
            try {
               const tempCanvas = document.createElement('canvas');
@@ -332,6 +369,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       renderReqRef.current = requestAnimationFrame(render);
 
+      // --- Model Initialization ---
       if (!handsRef.current) { 
           if (!window.Hands) {
              let attempts = 0;
@@ -340,7 +378,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 attempts++;
              }
              if (!window.Hands) {
-                setErrorMessage("AI 모델 로드 실패");
+                if (isMounted) setErrorMessage("AI 모델 로드 실패");
                 return;
              }
           }
@@ -360,8 +398,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
           hands.onResults((results: Results) => {
              if (isLoadingModel) setIsLoadingModel(false);
              isDetectingRef.current = false;
+             if (!isMounted) return;
+
              const now = Date.now();
-             const currentWinningIds = winningIdsRef.current; // Access current winners here
+             const currentWinningIds = winningIdsRef.current;
 
              const rawInputs: {x: number, y: number, index: number, label: 'Left' | 'Right'}[] = [];
              if (results.multiHandLandmarks) {
@@ -373,7 +413,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 });
              }
 
-             // Deduplication
+             // Hand Deduplication & Tracking Logic (Same as before)
              const uniqueInputs: typeof rawInputs = [];
              const processedIndices = new Set<number>();
 
@@ -382,12 +422,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  const handA = rawInputs[i];
                  let bestCandidate = handA;
                  processedIndices.add(i);
-
                  for (let j = i + 1; j < rawInputs.length; j++) {
                      if (processedIndices.has(j)) continue;
                      const handB = rawInputs[j];
                      const dist = Math.sqrt((handA.x - handB.x)**2 + (handA.y - handB.y)**2);
-                     
                      if (dist < DUPLICATE_HAND_THRESHOLD) {
                          processedIndices.add(j); 
                      }
@@ -396,7 +434,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              }
 
              const activeTracks = tracksRef.current;
-             
              activeTracks.forEach(t => {
                  t.missingCount++;
                  t.centroid.x += t.velocity.dx;
@@ -404,50 +441,28 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              });
 
              const matches: {trackIdx: number, inputIdx: number, cost: number}[] = [];
-             
              activeTracks.forEach((track, trackIdx) => {
-                 // Check if this track is a Winner. If so, we want to be VERY sticky.
                  const isWinner = currentWinningIds.includes(track.id);
-
                  uniqueInputs.forEach((input, inputIdx) => {
                      const dist = Math.sqrt((track.centroid.x - input.x)**2 + (track.centroid.y - input.y)**2);
-                     
-                     // Penalty for switching hands (Left <-> Right)
                      const handednessPenalty = (track.label !== input.label) ? 0.05 : 0; 
-                     
-                     // Cost calculation
                      let cost = dist + handednessPenalty;
-                     
-                     // Sticky Winner Logic:
-                     // If this is a winner track, substract a huge value from cost.
-                     // This ensures that when sorting by cost (ascending), this match comes first.
-                     // It effectively prioritizes maintaining the winner track over anything else.
-                     if (isWinner) {
-                        cost -= 1.0; 
-                     }
-
-                     if (dist < MAX_TRACKING_DISTANCE) {
-                         matches.push({trackIdx, inputIdx, cost});
-                     }
+                     if (isWinner) cost -= 1.0; 
+                     if (dist < MAX_TRACKING_DISTANCE) matches.push({trackIdx, inputIdx, cost});
                  });
              });
-
              matches.sort((a, b) => a.cost - b.cost);
 
              const matchedTrackIndices = new Set<number>();
              const matchedInputIndices = new Set<number>();
-
              matches.forEach(({trackIdx, inputIdx}) => {
                  if (matchedTrackIndices.has(trackIdx) || matchedInputIndices.has(inputIdx)) return;
-                 
                  const track = activeTracks[trackIdx];
                  const input = uniqueInputs[inputIdx];
-                 
                  const vx = input.x - track.centroid.x;
                  const vy = input.y - track.centroid.y;
                  track.velocity.dx = track.velocity.dx * 0.5 + vx * 0.5;
                  track.velocity.dy = track.velocity.dy * 0.5 + vy * 0.5;
-
                  track.centroid.x = input.x;
                  track.centroid.y = input.y;
                  track.lastSeen = now;
@@ -455,7 +470,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                  track.missingCount = 0;
                  track._tempMpIndex = input.index;
                  track.label = input.label; 
-
                  matchedTrackIndices.add(trackIdx);
                  matchedInputIndices.add(inputIdx);
              });
@@ -479,7 +493,6 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              tracksRef.current = keptTracks;
 
              const finalHands: DetectedHand[] = [];
-             
              keptTracks.forEach(track => {
                  if (track.missingCount === 0 && track._tempMpIndex !== undefined && results.multiHandLandmarks[track._tempMpIndex]) {
                      if (track.frameCount >= FRAME_PERSISTENCE_THRESHOLD) {
@@ -489,9 +502,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                      }
                  }
              });
-
              finalHands.sort((a, b) => a.centroid.x - b.centroid.x);
-             
              detectedHandsRef.current = finalHands;
 
              const shouldUpdate = 
@@ -508,7 +519,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
       }
 
       const detect = async () => {
-         if (isCancelled) return;
+         if (!isMounted) return;
          if (video.readyState >= 2 && handsRef.current && !isDetectingRef.current) {
             isDetectingRef.current = true;
             try {
@@ -527,7 +538,8 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
     initSystem();
 
     return () => {
-      isCancelled = true;
+      isMounted = false;
+      stopStream();
       if (renderReqRef.current) cancelAnimationFrame(renderReqRef.current);
       if (detectReqRef.current) cancelAnimationFrame(detectReqRef.current);
     };
@@ -631,7 +643,6 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, min
   const radius = minDimension * 0.15;
   const fontSize = Math.max(16, minDimension * 0.05); 
   
-  // Removed Opacity reduction for Ghost to make it persistent and visible
   ctx.globalAlpha = 1.0; 
 
   const gradient = ctx.createRadialGradient(x, y, radius * 0.5, x, y, radius * 1.5);
@@ -647,7 +658,6 @@ function drawWinnerBall(ctx: CanvasRenderingContext2D, x: number, y: number, min
   ctx.arc(x, y, radius, 0, 2 * Math.PI);
   ctx.fill();
   
-  // Added extra pulse ring for ghost to show it's "remembered"
   if (isGhost) {
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.lineWidth = Math.max(1, minDimension * 0.005);
