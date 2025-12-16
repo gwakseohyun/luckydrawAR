@@ -13,7 +13,7 @@ interface CameraLayerProps {
   gameState: GameState;
   onHandsUpdate: (hands: DetectedHand[]) => void;
   winningStableIds: number[]; 
-  triggerCapture: boolean;
+  captureTargets: number[];
   onCaptureComplete: (images: string[]) => void;
   onZoomInit?: (min: number, max: number, step: number, current: number) => void;
   onStreamReady?: () => void;
@@ -67,7 +67,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   gameState, 
   onHandsUpdate, 
   winningStableIds, 
-  triggerCapture, 
+  captureTargets, 
   onCaptureComplete,
   onZoomInit,
   onStreamReady
@@ -92,7 +92,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // Logic Refs
   const gameStateRef = useRef(gameState);
   const winningIdsRef = useRef(winningStableIds);
-  const triggerCaptureRef = useRef(triggerCapture);
+  const captureTargetsRef = useRef(captureTargets);
   
   // Performance Throttling Refs
   const lastLogicUpdateTimeRef = useRef<number>(0);
@@ -117,7 +117,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
   // Sync Props
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { winningIdsRef.current = winningStableIds; }, [winningStableIds]);
-  useEffect(() => { triggerCaptureRef.current = triggerCapture; }, [triggerCapture]);
+  useEffect(() => { captureTargetsRef.current = captureTargets; }, [captureTargets]);
 
   useImperativeHandle(ref, () => ({
     toggleCamera: () => {
@@ -237,6 +237,10 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         if (!isMounted) return;
         frameCounterRef.current++;
 
+        let sWidth = 0, sHeight = 0, sx = 0, sy = 0;
+        const cw = canvas.width;
+        const ch = canvas.height;
+
         if (video.readyState >= 2) {
            const dpr = Math.min(window.devicePixelRatio || 1, 2);
            const displayWidth = Math.floor(window.innerWidth * dpr);
@@ -250,14 +254,13 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
            const zoom = zoomStateRef.current;
            const vw = video.videoWidth;
            const vh = video.videoHeight;
-           const cw = canvas.width;
-           const ch = canvas.height;
+           // Update cw/ch after resize
+           const currentCw = canvas.width;
+           const currentCh = canvas.height;
 
            const videoRatio = vw / vh;
-           const canvasRatio = cw / ch;
+           const canvasRatio = currentCw / currentCh;
            
-           let sWidth, sHeight, sx, sy;
-
            if (canvasRatio > videoRatio) {
                sWidth = vw;
                sHeight = vw / canvasRatio;
@@ -279,7 +282,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
              ctx.scale(-1, 1);
            }
 
-           ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, cw, ch);
+           ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, currentCw, currentCh);
            ctx.restore();
         }
 
@@ -329,7 +332,7 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
                 const isCurrentlyDetected = hands.some(h => h.stableId === winId);
                 if (!isCurrentlyDetected) {
                     const vState = visualMap.get(winId);
-                    if (vState) {
+                    if (vState && (now - vState.lastSeen < 1000)) { // 1 second timeout
                         if (!vState.isVisuallyFist) {
                             drawWinnerBall(ctx, vState.x, vState.y, Math.min(canvas.width, canvas.height), true);
                         }
@@ -349,18 +352,58 @@ const CameraLayer = memo(forwardRef<CameraLayerHandle, CameraLayerProps>(({
         }
 
         // Capture logic
-        if (triggerCaptureRef.current) {
+        if (captureTargetsRef.current.length > 0 && video.readyState >= 2) {
            try {
               const tempCanvas = document.createElement('canvas');
               tempCanvas.width = canvas.width;
               tempCanvas.height = canvas.height;
               const tCtx = tempCanvas.getContext('2d');
+              
               if (tCtx) {
-                 tCtx.drawImage(canvas, 0, 0);
-                 onCaptureComplete([tempCanvas.toDataURL('image/png')]);
+                 const capturedImages: string[] = [];
+                 
+                 for (const targetId of captureTargetsRef.current) {
+                     // 1. Redraw Video
+                     tCtx.save();
+                     if (facingMode === 'user') {
+                       tCtx.translate(tempCanvas.width, 0);
+                       tCtx.scale(-1, 1);
+                     }
+                     tCtx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tempCanvas.width, tempCanvas.height);
+                     tCtx.restore();
+
+                     // 2. Redraw Overlays (Target Winner ONLY)
+                     
+                     // Draw active hands
+                     hands.forEach((hand, idx) => {
+                         const vState = visualMap.get(hand.stableId);
+                         if (vState) {
+                             // Only set isWinner=true if this hand matches the targetId
+                             const isTarget = hand.stableId === targetId;
+                             // Passing isWinner=isTarget ensures other winner balls (if any) are not drawn
+                             // because drawHandOverlay only draws ball if isWinner is true in SHOW_WINNER state.
+                             drawHandOverlay(tCtx, vState.x, vState.y, hand, currentGameState, idx, isTarget, vState.isVisuallyFist);
+                         }
+                     });
+                     
+                     // Draw ghost for target
+                     const vState = visualMap.get(targetId);
+                     const isCurrentlyDetected = hands.some(h => h.stableId === targetId);
+                     if (!isCurrentlyDetected && vState && (now - vState.lastSeen < 1000)) {
+                         if (!vState.isVisuallyFist) {
+                             drawWinnerBall(tCtx, vState.x, vState.y, Math.min(tempCanvas.width, tempCanvas.height), true);
+                         }
+                     }
+                     
+                     capturedImages.push(tempCanvas.toDataURL('image/png'));
+                 }
+                 
+                 onCaptureComplete(capturedImages);
+                 captureTargetsRef.current = []; // Clear local ref to prevent re-capture before prop update
               }
-           } catch (e) {}
-           triggerCaptureRef.current = false;
+           } catch (e) {
+              console.error("Capture failed", e);
+           }
         }
 
         renderReqRef.current = requestAnimationFrame(render);
