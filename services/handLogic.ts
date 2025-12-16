@@ -7,6 +7,9 @@ const THUMB_MCP = 2;
 const THUMB_IP = 3;
 const THUMB_TIP = 4;
 
+const INDEX_MCP = 5;
+const INDEX_TIP = 8;
+
 // Finger Indices (MCP, PIP, DIP, TIP)
 const FINGERS_INDICES = [
   [5, 6, 7, 8],   // Index
@@ -27,7 +30,7 @@ const distance = (p1: HandLandmark, p2: HandLandmark): number => {
 
 export const analyzeHand = (landmarks: HandLandmark[], index: number, handednessLabel: 'Left' | 'Right', stableId: number = -1): DetectedHand => {
   const wrist = landmarks[WRIST];
-  const indexMcp = landmarks[5];
+  const indexMcp = landmarks[INDEX_MCP];
   const pinkyMcp = landmarks[17];
 
   // --- 1. Detect Facing (Palm vs Back) ---
@@ -42,9 +45,6 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
     : (crossZ > 0.0001 ? 'Palm' : 'Back');
 
   // --- 2. Count Fingers (Extension Logic) ---
-  // A finger is "Extended" if Tip is significantly further from Wrist than PIP.
-  // Using 1.1 multiplier for robustness (Tip must be > 110% of PIP distance).
-  
   let fingersUp = 0;
   
   // Thumb (Special Case)
@@ -53,7 +53,6 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
   const dThumbTipWrist = distanceSq(thumbTip, wrist);
   const dThumbMcpWrist = distanceSq(thumbMcp, wrist);
   
-  // Thumb extended check
   if (dThumbTipWrist > dThumbMcpWrist * 1.1) {
      fingersUp++;
   }
@@ -73,12 +72,6 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
   }
 
   // --- 3. Fist Detection (Strict Fold Check) ---
-  // We ignore the thumb for Fist detection because thumb position varies (tucked/side/up).
-  // We strictly check the other 4 fingers (Index, Middle, Ring, Pinky).
-  // A finger is "Folded" if it is NOT extended.
-  // Ideally, for a fist, the Tip should be close to the palm, so Tip-Wrist < PIP-Wrist usually.
-  // But strictly, if it's just "not extended" (dTipWrist <= dPipWrist * 1.2), we count it as potentially folded.
-  
   let foldedFingersCount = 0;
   for (const [mcpIdx, pipIdx, _, tipIdx] of FINGERS_INDICES) {
       const tip = landmarks[tipIdx];
@@ -87,18 +80,24 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
       const dTipWrist = distanceSq(tip, wrist);
       const dPipWrist = distanceSq(pip, wrist);
 
-      // We use a slightly generous threshold for "Folded". 
-      // If the tip is NOT significantly extended (less than 1.3x PIP dist), we treat it as folded/curled.
       if (dTipWrist < dPipWrist * 1.3) {
           foldedFingersCount++;
       }
   }
-
-  // Definition of Fist:
-  // At least 3 out of the 4 main fingers must be folded.
-  // This allows for "Pointing" (1 finger up) to be NOT a fist, 
-  // but "Loose Fist" (fingers curled but not tight) to BE a fist.
   const isFist = foldedFingersCount >= 3;
+
+  // --- 4. OK Sign Detection (Pinch) ---
+  // Distance between Thumb Tip (4) and Index Tip (8)
+  const indexTip = landmarks[INDEX_TIP];
+  const pinchDistSq = distanceSq(thumbTip, indexTip);
+  
+  // Reference Scale: Wrist to Index MCP squared
+  // This normalizes for distance from camera
+  const refScaleSq = distanceSq(wrist, indexMcp);
+
+  // Threshold: If pinch distance is very small relative to hand size
+  // 0.08 is an empirical threshold for squared distance ratio (approx 0.28 linear)
+  const isOk = pinchDistSq < (refScaleSq * 0.08);
 
   const centroid = {
     x: landmarks[9].x, 
@@ -112,6 +111,7 @@ export const analyzeHand = (landmarks: HandLandmark[], index: number, handedness
     handedness: handednessLabel,
     facing,
     isFist,
+    isOk,
     fingerCount: fingersUp,
     centroid
   };
