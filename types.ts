@@ -21,6 +21,7 @@ export interface DetectedHand {
   handedness: 'Left' | 'Right';
   facing: 'Palm' | 'Back';
   isFist: boolean;
+  isOk: boolean; // Added for OK gesture
   fingerCount: number;
   centroid: { x: number; y: number };
 }
