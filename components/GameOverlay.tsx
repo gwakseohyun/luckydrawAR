@@ -196,11 +196,11 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
         `}>
           {/* Toggle Header */}
           <div 
-             className="flex justify-between items-center px-5 py-3 cursor-pointer h-14"
+             className="flex justify-between items-center px-6 py-3 cursor-pointer h-12"
              onClick={() => setIsInstructionExpanded(!isInstructionExpanded)}
           >
              <div className="flex items-center gap-2 text-white">
-                <Info className="w-5 h-5 text-yellow-400" />
+                <Info className="w-4 h-4 text-yellow-400" />
                 <span className="font-bold text-sm">
                    진행 안내
                 </span>
