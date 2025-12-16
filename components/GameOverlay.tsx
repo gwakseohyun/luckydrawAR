@@ -22,36 +22,6 @@ interface GameOverlayProps {
   onUpdateWinnerCount?: (delta: number) => void;
 }
 
-// Custom Icon for OK Gesture (Dashed Outline Style)
-const HandGestureIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} strokeDasharray="4 3">
-    {/* Outline of a hand doing OK sign */}
-    <path d="M12 2C12.55 2 13 2.45 13 3V10C13 10.55 12.55 11 12 11C11.45 11 11 10.55 11 10V3C11 2.45 11.45 2 12 2Z" />
-    <path d="M16 4C16.55 4 17 4.45 17 5V12H18V7C18 6.45 18.45 6 19 6C19.55 6 20 6.45 20 7V15C20 18.87 16.87 22 13 22C9.13 22 6 18.87 6 15V9C6 8.45 6.45 8 7 8C7.55 8 8 8.45 8 9V16H9V5C9 4.45 9.45 4 10 4" />
-    <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="2" strokeDasharray="0" />
-    <path d="M10.8 10.4L13.2 12.8" />
-  </svg>
-);
-
-// Simplified OK Icon (Better visibility)
-const OkGestureIcon = ({ className }: { className?: string }) => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} strokeDasharray="4 3">
-        {/* Thumb and Index Circle */}
-        <circle cx="9" cy="11" r="3.5" />
-        {/* Middle Finger */}
-        <path d="M14 6V14" />
-        <path d="M14 6C14 5.2 14.7 4.5 15.5 4.5C16.3 4.5 17 5.2 17 6" />
-        {/* Ring Finger */}
-        <path d="M17 6V14" />
-        <path d="M17 6C17 5.2 17.7 4.5 18.5 4.5C19.3 4.5 20 5.2 20 6" />
-        {/* Pinky Finger */}
-        <path d="M20 6V15C20 18.5 17 21.5 13.5 21.5C11.5 21.5 10 20.5 9 19" />
-        {/* Wrist/Hand base */}
-        <path d="M9 14.5V19" />
-    </svg>
-);
-
-
 const GameOverlay: React.FC<GameOverlayProps> = memo(({
   gameState,
   participantCount,
@@ -150,9 +120,9 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
                        </div>
                    )}
                    {isDetecting && canStart && (
-                       <div className="bg-yellow-400 text-black px-5 py-2.5 rounded-full text-sm font-bold shadow-[0_0_20px_rgba(250,204,21,0.6)] flex items-center gap-3 animate-pulse border-2 border-white/20">
-                          <OkGestureIcon className="w-6 h-6" />
-                          <span>엄지와 검지를 맞대어 OK 사인 만들기</span>
+                       <div className="bg-yellow-400 text-black px-4 py-2 rounded-full text-sm font-bold shadow-[0_0_20px_rgba(250,204,21,0.6)] flex items-center gap-2 animate-pulse border-2 border-white/20">
+                          <span className="text-xl">👌</span>
+                          <span>엄지와 검지로 OK 사인을 보여주세요</span>
                        </div>
                    )}
                    {gameState === GameState.SHOW_WINNER && (
@@ -229,11 +199,11 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
         <div className={`
             bg-gray-900/90 backdrop-blur-xl border-t border-white/10 
             rounded-t-2xl transition-all duration-300 ease-spring shadow-[0_-10px_40px_rgba(0,0,0,0.5)]
-            ${isInstructionExpanded ? 'pb-[calc(env(safe-area-inset-bottom)+1.5rem)]' : 'pb-[env(safe-area-inset-bottom)]'}
+            ${isInstructionExpanded ? 'pb-[calc(env(safe-area-inset-bottom)+1rem)]' : 'pb-[env(safe-area-inset-bottom)]'}
         `}>
           {/* Toggle Header */}
           <div 
-             className="flex justify-between items-center px-6 py-3 cursor-pointer h-12"
+             className="flex justify-between items-center px-6 py-2 cursor-pointer h-10"
              onClick={() => setIsInstructionExpanded(!isInstructionExpanded)}
           >
              <div className="flex items-center gap-2 text-white">
@@ -250,24 +220,20 @@ const GameOverlay: React.FC<GameOverlayProps> = memo(({
           {/* Content */}
           {isInstructionExpanded && (
              <div className="px-5 pb-2 animate-fade-in">
-                <div className="mb-6 leading-relaxed text-center font-medium text-gray-200">
+                <div className="mb-3 leading-tight text-center font-medium text-gray-200">
                    {isDetecting ? (
-                       <div className="flex flex-col gap-2 items-center">
-                         <div className="flex items-center gap-2 text-yellow-400 mb-1">
-                             <OkGestureIcon className="w-6 h-6" />
-                             <span className="font-bold text-lg">시작 제스처</span>
-                         </div>
-                         <p className="text-lg text-white/90">
-                            시작하려면 대표 1명이 <br/>
-                            <span className="text-yellow-400 font-bold underline underline-offset-4">엄지와 검지를 맞대어 OK 사인</span>을 만들어주세요
+                       <div className="flex items-center justify-center gap-2 py-1">
+                         <span className="text-2xl">👌</span>
+                         <p className="text-base text-white/90 font-bold">
+                            엄지와 검지로 OK 사인을 보여주세요
                          </p>
                        </div>
                    ) : (
-                       <p className="text-lg">{INSTRUCTIONS[gameState]}</p>
+                       <p className="text-base">{INSTRUCTIONS[gameState]}</p>
                    )}
                 </div>
 
-                <div className="grid grid-cols-[1fr_auto] gap-3 items-center">
+                <div className="grid grid-cols-[1fr_auto] gap-2 items-center">
                     <div className="w-full">
                         {isDetecting ? (
                            <>
